@@ -1,0 +1,31 @@
+menu "Netlab"
+
+    config NETLAB_MDNS_HOSTNAME
+        string "mDNS host name"
+        default "netlab"
+        help
+            The web UI is reachable at http://<name>.local
+
+    config NETLAB_DEPLOY_WEB_PAGES
+        bool "Flash the web UI (front/web/dist) into the www partition"
+        default y
+        help
+            Needs 'pnpm install && pnpm build' in front/web first. Disable it while
+            developing the UI with 'pnpm dev': the Vite dev server proxies /api to
+            the device, so nothing has to be flashed for UI changes.
+
+    config NETLAB_RESET_BUTTON_GPIO
+        int "Reset button GPIO"
+        range 0 48
+        default 0
+        help
+            Holding this button forgets the saved Wi-Fi network and restarts into setup
+            mode. GPIO0 is the BOOT button on ESP32-S3-DevKitC-1. Hold it after the
+            board has booted (holding it while powering on enters the flash bootloader).
+
+    config NETLAB_RESET_HOLD_MS
+        int "Hold time to reset the Wi-Fi network (ms)"
+        range 1000 30000
+        default 5000
+
+endmenu

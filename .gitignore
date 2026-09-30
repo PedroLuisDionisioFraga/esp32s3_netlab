@@ -1,0 +1,9 @@
+build/
+.cache/
+managed_components/
+sdkconfig
+sdkconfig.old
+
+front/web/node_modules/
+front/web/dist/
+front/web/.env

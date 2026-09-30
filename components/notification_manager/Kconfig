@@ -1,0 +1,17 @@
+menu "Status LED"
+
+    config STATUS_LED_GPIO
+        int "Addressable (WS2812) LED GPIO"
+        default 38
+        help
+            ESP32-S3-DevKitC-1 v1.1 has its RGB LED on GPIO38; v1.0 has it on GPIO48.
+
+    config STATUS_LED_BRIGHTNESS_PERCENT
+        int "Brightness cap (percent)"
+        range 1 100
+        default 20
+        help
+            A WS2812 at full power is blinding. Every color, including the ones set
+            from the web UI, is scaled by this percentage.
+
+endmenu

@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1418" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="data:,">
+<title>Netlab setup</title>
+<style>
+  /* System fonts and inline icons only: this page is served by the device itself, with no internet. */
+  :root {
+    color-scheme: light dark;
+    --bg: #f4f6f8; --card: #fff; --field: #f8fafb; --text: #17212b; --muted: #5d6b79;
+    --border: #dde3e9; --field-border: #8796a4; --bar-off: #cbd5dd;
+    --accent: #0f766e; --accent-hover: #115e59; --on-accent: #fff;
+    --accent-soft: rgba(15, 118, 110, 0.10); --ring: rgba(15, 118, 110, 0.30); --glow: rgba(15, 118, 110, 0.12);
+    --ok: #15803d; --warn: #b45309; --bad: #b91c1c; --info: #0f766e;
+    --ok-soft: rgba(21, 128, 61, 0.09); --warn-soft: rgba(180, 83, 9, 0.09);
+    --bad-soft: rgba(185, 28, 28, 0.08); --info-soft: rgba(15, 118, 110, 0.09);
+    --shadow: 0 1px 2px rgba(23, 33, 43, 0.06), 0 4px 16px rgba(23, 33, 43, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1418; --card: #182027; --field: #0f1418; --text: #e6ebf0; --muted: #93a1af;
+      --border: #2a343d; --field-border: #5f6e7b; --bar-off: #3a4651;
+      --accent: #2dd4bf; --accent-hover: #5eead4; --on-accent: #042f2e;
+      --accent-soft: rgba(45, 212, 191, 0.12); --ring: rgba(45, 212, 191, 0.35); --glow: rgba(45, 212, 191, 0.10);
+      --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --info: #2dd4bf;
+      --ok-soft: rgba(74, 222, 128, 0.10); --warn-soft: rgba(251, 191, 36, 0.10);
+      --bad-soft: rgba(248, 113, 113, 0.10); --info-soft: rgba(45, 212, 191, 0.10);
+      --shadow: none;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; min-height: 100vh; color: var(--text); background-color: var(--bg);
+    background-image: radial-gradient(520px 220px at 50% -40px, var(--glow), transparent);
+    background-repeat: no-repeat;
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; padding: 24px 16px 32px; padding-bottom: calc(32px + env(safe-area-inset-bottom)); }
+  p { margin: 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+  .ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Header */
+  .hero { display: flex; align-items: center; gap: 14px; }
+  .logo { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 14px; background: var(--accent-soft); color: var(--accent); }
+  .logo .ic { width: 26px; height: 26px; }
+  h1 { margin: 0; font-size: 1.6rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; }
+  .lead { margin-top: 14px; color: var(--muted); }
+
+  /* Cards */
+  .card { margin-top: 20px; padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow); }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  h2 { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 1.05rem; line-height: 1.3; font-weight: 600; }
+  .step { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 0.8rem; font-weight: 700; }
+  .hint { margin-top: 6px; font-size: 0.85rem; color: var(--muted); }
+  .hint.bad { color: var(--bad); }
+
+  /* Buttons */
+  button { font: inherit; color: var(--text); cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  button:disabled { opacity: 0.55; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn { min-height: 44px; padding: 0 16px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); font-weight: 500; transition: background-color 0.15s, border-color 0.15s; }
+  .btn:hover:not(:disabled) { border-color: var(--accent); }
+  .btn:active:not(:disabled) { background: var(--accent-soft); }
+  .btn.small { padding: 0 12px; font-size: 0.9rem; }
+  .btn.primary { width: 100%; min-height: 50px; margin-top: 20px; border-color: var(--accent); background: var(--accent); color: var(--on-accent); font-weight: 600; font-size: 1.05rem; }
+  .btn.primary:hover:not(:disabled), .btn.primary:active:not(:disabled) { border-color: var(--accent-hover); background: var(--accent-hover); }
+  .btn.primary.loading:disabled, .btn.primary.done:disabled { opacity: 1; }
+  .btn.primary.loading:disabled { cursor: progress; }
+  .btn.more { width: 100%; margin-top: 4px; border-style: dashed; color: var(--muted); }
+  .spinner { display: none; width: 18px; height: 18px; flex: none; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+  .loading .spinner { display: inline-block; }
+  .scanning .ic { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Network list */
+  .nets { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+  .net { width: 100%; min-height: 60px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; text-align: left; border-radius: 12px; border: 1px solid var(--border); background: var(--field); transition: background-color 0.15s, border-color 0.15s; }
+  .net:hover:not(:disabled) { border-color: var(--accent); }
+  .net:active:not(:disabled) { background: var(--accent-soft); }
+  .net.selected { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+  .net-name { display: block; font-weight: 600; overflow-wrap: anywhere; }
+  .net-meta { margin-top: 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 0.85rem; color: var(--muted); }
+  .net-meta .ic { width: 14px; height: 14px; }
+  .tick { color: var(--accent); visibility: hidden; }
+  .net.selected .tick { visibility: visible; }
+  .locked { pointer-events: none; opacity: 0.6; }
+
+  .bars { display: inline-flex; align-items: flex-end; gap: 3px; height: 20px; }
+  .bars i { width: 5px; border-radius: 1.5px; background: var(--bar-off); }
+  .bars i:nth-child(1) { height: 25%; }
+  .bars i:nth-child(2) { height: 50%; }
+  .bars i:nth-child(3) { height: 75%; }
+  .bars i:nth-child(4) { height: 100%; }
+  .bars i.on { background: var(--accent); }
+
+  .skel { height: 60px; border-radius: 12px; background: var(--field); border: 1px solid var(--border); animation: pulse 1.2s ease-in-out infinite; }
+  .skel:nth-child(2) { animation-delay: 0.15s; }
+  .skel:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes pulse { 50% { opacity: 0.45; } }
+
+  .empty { padding: 16px 8px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; color: var(--muted); }
+  .empty .ic { width: 28px; height: 28px; margin-bottom: 4px; }
+  .empty.bad .ic { color: var(--bad); }
+  .empty strong { color: var(--text); }
+
+  /* Form */
+  .field { margin-top: 16px; }
+  .field:first-of-type { margin-top: 14px; }
+  label { display: block; margin-bottom: 6px; font-size: 0.9rem; font-weight: 500; }
+  input[type=text], input[type=password] { width: 100%; height: 50px; padding: 0 14px; font: inherit; color: var(--text); background: var(--field); border: 1px solid var(--field-border); border-radius: 12px; transition: border-color 0.15s, box-shadow 0.15s; }
+  input:focus { outline: 2px solid transparent; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
+  input[aria-invalid=true] { border-color: var(--bad); }
+  input[aria-invalid=true]:focus { box-shadow: 0 0 0 3px var(--bad-soft); }
+  input:disabled { opacity: 0.6; }
+  .input-wrap { position: relative; }
+  .input-wrap input { padding-right: 52px; }
+  .icon-btn { position: absolute; top: 3px; right: 3px; width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 10px; background: none; color: var(--muted); }
+  .icon-btn:hover:not(:disabled) { color: var(--text); }
+  #show .off { display: none; }
+  #show[aria-pressed=true] .on { display: none; }
+  #show[aria-pressed=true] .off { display: block; }
+
+  /* Notices */
+  .notice { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--info-soft); box-shadow: inset 3px 0 0 var(--info); }
+  .notice .ic, .notice .spinner { margin-top: 2px; color: var(--info); }
+  .notice .spinner { display: block; width: 20px; height: 20px; }
+  .notice.ok { background: var(--ok-soft); box-shadow: inset 3px 0 0 var(--ok); }
+  .notice.ok .ic { color: var(--ok); }
+  .notice.warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+  .notice.warn .ic { color: var(--warn); }
+  .notice.bad { background: var(--bad-soft); box-shadow: inset 3px 0 0 var(--bad); }
+  .notice.bad .ic { color: var(--bad); }
+  .notice-title { font-weight: 600; }
+  .notice-detail { margin-top: 2px; font-size: 0.92rem; color: var(--muted); }
+  .notice-url { display: block; margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--card); border: 1px solid var(--border); font: 600 0.95rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
+  #note { margin-top: 20px; }
+  #message:not(:empty) { margin-top: 16px; }
+
+  .foot { margin-top: 20px; display: flex; align-items: flex-start; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+  .foot .ic { width: 16px; height: 16px; margin-top: 2px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+    .skel { animation: none; }
+    .spinner, .scanning .ic { animation-duration: 2s; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/></symbol>
+  <symbol id="i-wifi-off" viewBox="0 0 24 24"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+</svg>
+
+<main>
+  <header class="hero">
+    <div class="logo" aria-hidden="true"><svg class="ic"><use href="#i-wifi"/></svg></div>
+    <h1>Netlab setup</h1>
+  </header>
+  <p class="lead">Choose the Wi-Fi network. It remembers it.</p>
+  <div id="note" hidden></div>
+
+  <section class="card" aria-labelledby="networks-title">
+    <div class="card-head">
+      <h2 id="networks-title"><span class="step" aria-hidden="true">1</span>Networks nearby</h2>
+      <button id="scan" class="btn small" type="button"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg><span id="scan-label">Scan again</span></button>
+    </div>
+    <ul id="networks" class="nets" aria-busy="true"></ul>
+  </section>
+
+  <form id="form" class="card" autocomplete="off" aria-labelledby="connect-title">
+    <h2 id="connect-title"><span class="step" aria-hidden="true">2</span>Connect</h2>
+
+    <div class="field">
+      <label for="ssid">Network name</label>
+      <input id="ssid" type="text" required maxlength="32" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="next" aria-describedby="ssid-help">
+      <p id="ssid-help" class="hint">Pick a network above, or type the name of a hidden one.</p>
+    </div>
+
+    <div class="field">
+      <label for="password">Password</label>
+      <div class="input-wrap">
+        <input id="password" type="password" maxlength="63" autocomplete="off" autocapitalize="off" enterkeyhint="go" aria-describedby="password-help">
+        <button id="show" class="icon-btn" type="button" aria-label="Show password" aria-pressed="false">
+          <svg class="ic on" aria-hidden="true"><use href="#i-eye"/></svg>
+          <svg class="ic off" aria-hidden="true"><use href="#i-eye-off"/></svg>
+        </button>
+      </div>
+      <p id="password-help" class="hint">Leave empty for an open network.</p>
+    </div>
+
+    <button id="connect" class="btn primary" type="submit"><span class="spinner" aria-hidden="true"></span><span id="connect-label">Connect</span></button>
+    <div id="message" role="status" aria-live="polite"></div>
+  </form>
+
+  <p class="foot"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg><span>This device only supports 2.4 GHz Wi-Fi.</span></p>
+</main>
+
+<script>
+'use strict';
+
+var els = {
+  note: document.getElementById('note'),
+  list: document.getElementById('networks'),
+  scan: document.getElementById('scan'),
+  scanLabel: document.getElementById('scan-label'),
+  form: document.getElementById('form'),
+  ssid: document.getElementById('ssid'),
+  password: document.getElementById('password'),
+  passwordHelp: document.getElementById('password-help'),
+  show: document.getElementById('show'),
+  connect: document.getElementById('connect'),
+  connectLabel: document.getElementById('connect-label'),
+  message: document.getElementById('message')
+};
+var hostname = 'netlab';
+var scanning = false;
+var busy = false;
+var done = false;
+var rows = [];
+
+var SVG_NS = 'http://www.w3.org/2000/svg';
+var VISIBLE_NETWORKS = 6;
+var PASSWORD_HINT = 'Leave empty for an open network.';
+var SIGNAL_LABELS = ['', 'Weak signal', 'Fair signal', 'Good signal', 'Excellent signal'];
+var NOTICE_ICONS = { ok: 'circle-check', warn: 'circle-alert', bad: 'circle-alert', info: 'info' };
+
+var FAILURES = {
+  not_found: 'Network not found. Check the name, and remember this device only supports 2.4 GHz Wi-Fi.',
+  wrong_password: 'The router did not accept the password.',
+  timeout: 'The router did not answer in time.',
+  failed: 'Something went wrong. Check the details and try again.'
+};
+
+function sleep(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+function api(path, options, timeoutMs) {
+  var controller = new AbortController();
+  var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 6000);
+  var init = Object.assign({ signal: controller.signal }, options || {});
+  return fetch('/api/v1' + path, init)
+    .then(function (res) {
+      return res.text().then(function (text) {
+        if (!res.ok) { throw new Error(text || ('Error ' + res.status)); }
+        return JSON.parse(text);
+      });
+    })
+    .finally(function () { clearTimeout(timer); });
+}
+
+// Network names come from the air, so they are only ever written with textContent.
+function el(tag, className, text) {
+  var node = document.createElement(tag);
+  if (className) { node.className = className; }
+  if (text !== undefined) { node.textContent = text; }
+  return node;
+}
+
+function icon(name) {
+  var svg = document.createElementNS(SVG_NS, 'svg');
+  var use = document.createElementNS(SVG_NS, 'use');
+  svg.setAttribute('class', 'ic');
+  svg.setAttribute('aria-hidden', 'true');
+  use.setAttribute('href', '#i-' + name);
+  svg.appendChild(use);
+  return svg;
+}
+
+// kind: 'busy' (spinner), 'ok', 'warn', 'bad' or 'info'. An empty title clears the notice.
+function show(target, kind, title, detail, url) {
+  target.textContent = '';
+  if (!title) { return; }
+  var box = el('div', 'notice ' + (kind === 'busy' ? 'info' : kind));
+  var body = el('div');
+  if (kind === 'busy') {
+    var spinner = el('span', 'spinner');
+    spinner.setAttribute('aria-hidden', 'true');
+    box.appendChild(spinner);
+  } else {
+    box.appendChild(icon(NOTICE_ICONS[kind]));
+  }
+  body.appendChild(el('p', 'notice-title', title));
+  if (detail) { body.appendChild(el('p', 'notice-detail', detail)); }
+  if (url) { body.appendChild(el('code', 'notice-url', url)); }
+  box.appendChild(body);
+  target.appendChild(box);
+}
+
+function say(kind, title, detail, url) {
+  show(els.message, kind, title, detail, url);
+}
+
+function updateControls() {
+  els.scan.disabled = scanning || busy;
+  els.scan.className = 'btn small' + (scanning ? ' scanning' : '');
+  els.scanLabel.textContent = scanning ? 'Scanning…' : 'Scan again';
+  els.list.setAttribute('aria-busy', scanning ? 'true' : 'false');
+  els.list.className = 'nets' + (busy ? ' locked' : '');
+  els.ssid.disabled = busy;
+  els.password.disabled = busy;
+  els.show.disabled = busy;
+  els.connect.disabled = busy;
+  els.connect.className = 'btn primary' + (busy && !done ? ' loading' : '') + (done ? ' done' : '');
+  els.connectLabel.textContent = done ? 'Connected' : (busy ? 'Connecting…' : 'Connect');
+}
+
+function setPasswordHelp(text, isError) {
+  els.passwordHelp.textContent = text;
+  els.passwordHelp.className = 'hint' + (isError ? ' bad' : '');
+  if (isError) { els.password.setAttribute('aria-invalid', 'true'); }
+  else { els.password.removeAttribute('aria-invalid'); }
+}
+
+function signalLevel(rssi) {
+  if (rssi >= -55) { return 4; }
+  if (rssi >= -65) { return 3; }
+  if (rssi >= -75) { return 2; }
+  return 1;
+}
+
+function syncSelection() {
+  rows.forEach(function (row) {
+    var selected = row.ssid === els.ssid.value;
+    row.button.className = 'net' + (selected ? ' selected' : '');
+    row.button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  });
+}
+
+function listMessage(kind, title, detail) {
+  var item = el('li', 'empty' + (kind === 'bad' ? ' bad' : ''));
+  item.appendChild(icon(kind === 'bad' ? 'circle-alert' : 'wifi-off'));
+  item.appendChild(el('strong', '', title));
+  item.appendChild(el('span', '', detail));
+  els.list.textContent = '';
+  els.list.appendChild(item);
+  rows = [];
+}
+
+function renderSkeleton() {
+  els.list.textContent = '';
+  rows = [];
+  for (var i = 0; i < 3; i += 1) { els.list.appendChild(el('li', 'skel')); }
+}
+
+function renderNetwork(network, hidden) {
+  var item = el('li');
+  var button = el('button', 'net');
+  button.type = 'button';
+  item.hidden = hidden;
+
+  var level = signalLevel(network.rssi);
+  var bars = el('span', 'bars');
+  bars.setAttribute('role', 'img');
+  bars.setAttribute('aria-label', SIGNAL_LABELS[level]);
+  for (var i = 1; i <= 4; i += 1) { bars.appendChild(el('i', i <= level ? 'on' : '')); }
+
+  var text = el('span');
+  var meta = el('span', 'net-meta');
+  meta.appendChild(icon(network.secure ? 'lock' : 'unlock'));
+  meta.appendChild(el('span', '', (network.secure ? 'Secured' : 'Open') + ' · ' + network.rssi + ' dBm · channel ' + network.channel));
+  text.appendChild(el('span', 'net-name', network.ssid));
+  text.appendChild(meta);
+
+  var tick = el('span', 'tick');
+  tick.appendChild(icon('check'));
+
+  button.appendChild(bars);
+  button.appendChild(text);
+  button.appendChild(tick);
+  button.addEventListener('click', function () {
+    if (busy) { return; }
+    els.ssid.value = network.ssid;
+    syncSelection();
+    if (network.secure) {
+      els.password.focus();
+    } else {
+      els.password.value = '';
+      setPasswordHelp(PASSWORD_HINT, false);
+      els.connect.focus();
+    }
+  });
+
+  item.appendChild(button);
+  els.list.appendChild(item);
+  rows.push({ ssid: network.ssid, button: button });
+}
+
+function renderNetworks(networks) {
+  els.list.textContent = '';
+  rows = [];
+  if (networks.length === 0) {
+    listMessage('info', 'No networks found', 'Move closer to your router and scan again.');
+    return;
+  }
+  networks.forEach(function (network, index) {
+    renderNetwork(network, index >= VISIBLE_NETWORKS);
+  });
+
+  var extra = networks.length - VISIBLE_NETWORKS;
+  if (extra > 0) {
+    var item = el('li');
+    var more = el('button', 'btn more', 'Show ' + extra + ' more network' + (extra === 1 ? '' : 's'));
+    more.type = 'button';
+    more.addEventListener('click', function () {
+      Array.prototype.forEach.call(els.list.children, function (child) { child.hidden = false; });
+      item.hidden = true;
+    });
+    item.appendChild(more);
+    els.list.appendChild(item);
+  }
+  syncSelection();
+}
+
+function scan() {
+  scanning = true;
+  updateControls();
+  renderSkeleton();
+  return api('/wifi/scan', {}, 20000)
+    .then(function (result) { renderNetworks(result.networks); })
+    .catch(function () {
+      listMessage('bad', 'Scan failed', 'Press "Scan again", or type the network name below.');
+    })
+    .finally(function () {
+      scanning = false;
+      updateControls();
+    });
+}
+
+// While the device joins the router its radio may change channel and this page can drop for a
+// moment, so a few failed polls are normal.
+function waitForResult() {
+  var deadline = Date.now() + 60000;
+  var errors = 0;
+
+  function poll() {
+    if (Date.now() > deadline) { return Promise.resolve({ lost: true }); }
+    return sleep(1500)
+      .then(function () { return api('/wifi/status', {}, 4000); })
+      .then(function (status) {
+        errors = 0;
+        var provision = status.provision;
+        if (provision.state === 'success') { return { ok: true }; }
+        if (provision.state === 'failed') { return { ok: false, reason: provision.reason }; }
+        return poll();
+      })
+      .catch(function () {
+        errors += 1;
+        say('busy', 'Waiting for the device…', 'The setup network can drop for a moment while it joins your router.');
+        return errors > 8 ? { lost: true } : poll();
+      });
+  }
+  return poll();
+}
+
+els.show.addEventListener('click', function () {
+  var visible = els.password.type === 'password';
+  els.password.type = visible ? 'text' : 'password';
+  els.show.setAttribute('aria-pressed', visible ? 'true' : 'false');
+  els.show.setAttribute('aria-label', visible ? 'Hide password' : 'Show password');
+  els.password.focus();
+});
+
+els.ssid.addEventListener('input', syncSelection);
+els.password.addEventListener('input', function () { setPasswordHelp(PASSWORD_HINT, false); });
+els.scan.addEventListener('click', scan);
+
+els.form.addEventListener('submit', function (event) {
+  event.preventDefault();
+  var ssid = els.ssid.value;
+  var password = els.password.value;
+
+  if (password.length > 0 && (password.length < 8 || password.length > 63)) {
+    setPasswordHelp('The password must be 8 to 63 characters, or empty for an open network.', true);
+    els.password.focus();
+    return;
+  }
+
+  say('', '');
+  busy = true;
+  updateControls();
+  say('busy', 'Connecting to ' + ssid + '…', 'This can take up to a minute.');
+
+  api('/wifi/provision', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ssid: ssid, password: password })
+  })
+    .then(waitForResult)
+    .then(function (result) {
+      var address = 'http://' + hostname + '.local/';
+      if (result.ok) {
+        done = true;
+        updateControls();
+        say('ok', 'Connected to ' + ssid,
+            'This setup network closes in a few seconds. Reconnect your phone to ' + ssid + ', then open:', address);
+        return;
+      }
+      if (result.lost) {
+        say('warn', 'Lost contact with the device',
+            'If the setup network has disappeared it probably connected. Reconnect your phone to ' +
+            ssid + ' and open:', address);
+      } else {
+        say('bad', 'Could not connect', FAILURES[result.reason] || FAILURES.failed);
+      }
+      busy = false;
+      updateControls();
+      if (result.reason === 'wrong_password') {
+        els.password.focus();
+        els.password.select();
+      }
+    })
+    .catch(function (error) {
+      say('bad', 'Something went wrong', error.message);
+      busy = false;
+      updateControls();
+    });
+});
+
+updateControls();
+api('/wifi/status', {}, 4000)
+  .then(function (status) {
+    if (status.hostname) { hostname = status.hostname; }
+    if (status.saved_ssid) {
+      show(els.note, 'info', 'This device was set up for "' + status.saved_ssid + '"',
+           'It cannot reach that network right now and keeps trying. You can also choose another one.');
+      els.note.hidden = false;
+    }
+  })
+  .catch(function () {})
+  .then(scan);
+</script>
+</body>
+</html>
