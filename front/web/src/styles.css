@@ -156,6 +156,10 @@ dd {
   gap: 8px;
 }
 
+.row > .hint {
+  margin: 0;
+}
+
 .row.action {
   margin-top: 16px;
 }

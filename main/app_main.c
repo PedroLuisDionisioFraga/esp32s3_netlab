@@ -102,6 +102,7 @@ void app_main(void)
      * another home) the device opens its own setup Wi-Fi: no rebuild or reflash is ever needed. */
     const wifi_bridge_config_t wifi_cfg = {
         .status_events = notification_manager_get_event_group(), /* NULL when the LED is disabled */
+        .on_setup_closing = rest_server_close_clients,
     };
     ESP_ERROR_CHECK(wifi_bridge_start(&wifi_cfg));
 
@@ -111,4 +112,8 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(rest_server_start(&rest_cfg));
     ESP_LOGI(TAG, "Web UI at http://%s.local/", CONFIG_NETLAB_MDNS_HOSTNAME);
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 }

@@ -1,7 +1,7 @@
 # Target: run `idf.py set-target esp32s3` once before the first build.
 
-# Flash layout (4 MB is safe on every DevKitC-1 variant)
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Flash layout (this board has 16 MB; use 4MB instead for other DevKitC-1 variants)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"

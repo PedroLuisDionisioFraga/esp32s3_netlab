@@ -18,6 +18,8 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
+        // POST /chat goes to the device; GET /chat stays with Vite (it is the chat page).
+        '/chat': { target: espHost, changeOrigin: true, bypass: (req) => (req.method === 'GET' ? req.url : undefined) },
         // `pnpm dev` serves the UI from the PC and forwards /api to the device.
         '/api': {
           target: espHost,

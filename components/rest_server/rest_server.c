@@ -1,5 +1,6 @@
 #include "rest_server.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "lwip/sockets.h"
 #include "notification_manager.h"
 #include "wifi_bridge.h"
 
@@ -426,6 +428,24 @@ static void set_file_headers(httpd_req_t *req, const char *filepath)
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 }
 
+/* POST /chat with a JSON body: placeholder that echoes the message back. */
+static esp_err_t chat_post_handler(httpd_req_t *req)
+{
+  cJSON *msg = recv_json_body(req);
+  if (!msg)
+    return ESP_OK; /* the error response was already sent */
+
+  const cJSON *text = cJSON_GetObjectItemCaseSensitive(msg, "message");
+  if (!cJSON_IsString(text))
+  {
+    cJSON_Delete(msg);
+    return send_error(req, "400 Bad Request", "Expected {\"message\": \"...\"}");
+  }
+  ESP_LOGI(TAG, "Chat: %s", text->valuestring);
+
+  return send_json(req, msg); /* send_json frees msg */
+}
+
 /* Every GET that is not an API route. */
 static esp_err_t static_get_handler(httpd_req_t *req)
 {
@@ -455,6 +475,12 @@ static esp_err_t static_get_handler(httpd_req_t *req)
     return httpd_resp_send_404(req);
 
   int fd = open(filepath, O_RDONLY, 0);
+  if (fd < 0 && !strchr(strrchr(filepath, '/'), '.'))
+  {
+    /* Client-side route such as /chat (no file extension): the web UI picks the view. */
+    snprintf(filepath, sizeof(filepath), "%s/index.html", ctx->base_path);
+    fd = open(filepath, O_RDONLY, 0);
+  }
   if (fd < 0)
     return httpd_resp_send_404(req);
 
@@ -484,6 +510,41 @@ static esp_err_t static_get_handler(httpd_req_t *req)
 
 /* ---------- server ---------- */
 
+static httpd_handle_t s_server;
+
+void rest_server_close_clients(void)
+{
+  int fds[CONFIG_LWIP_MAX_SOCKETS];
+  size_t count = sizeof(fds) / sizeof(fds[0]);
+  if (!s_server || httpd_get_client_list(s_server, &count, fds) != ESP_OK)
+    return;
+
+  for (size_t i = 0; i < count; i++)
+    httpd_sess_trigger_close(s_server, fds[i]);
+}
+
+/* Diagnostic: dumps data that does not start like an HTTP request (to find who sends the
+ * "parser error = 16" garbage). Otherwise behaves like the default recv. */
+static int diag_recv(httpd_handle_t hd, int sockfd, char *buf, size_t buf_len, int flags)
+{
+  (void)hd;
+  int n = recv(sockfd, buf, buf_len, flags);
+  if (n < 0)
+    return (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) ? HTTPD_SOCK_ERR_TIMEOUT : HTTPD_SOCK_ERR_FAIL;
+
+  if (n > 0 && (buf[0] < 'A' || buf[0] > 'Z') && buf[0] != '{')
+  {
+    ESP_LOGW(TAG, "Non-HTTP data on fd %d, %d bytes:", sockfd, n);
+    ESP_LOG_BUFFER_HEXDUMP(TAG, buf, n < 96 ? n : 96, ESP_LOG_WARN);
+  }
+  return n;
+}
+
+static esp_err_t diag_open(httpd_handle_t hd, int sockfd)
+{
+  return httpd_sess_set_recv_override(hd, sockfd, diag_recv);
+}
+
 esp_err_t rest_server_start(const rest_server_config_t *cfg)
 {
   httpd_handle_t server = NULL;
@@ -506,6 +567,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.max_uri_handlers = 16; /* room for the endpoints added in later milestones */
   config.stack_size = 6144;
+  config.open_fn = diag_open;
   config.lru_purge_enable = true; /* browsers open several sockets; recycle the oldest when full */
 
   esp_err_t err = httpd_start(&server, &config);
@@ -524,6 +586,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/provision", .method = HTTP_POST, .handler = wifi_provision_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/forget", .method = HTTP_POST, .handler = wifi_forget_post_handler, .user_ctx = ctx},
+    {.uri = "/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
     /* Last, so the API routes above win over the wildcard. It always exists: the setup
      * portal needs it even when no web UI is mounted. */
     {.uri = "/*", .method = HTTP_GET, .handler = static_get_handler, .user_ctx = ctx},
@@ -540,6 +603,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     }
   }
 
+  s_server = server;
   ESP_LOGI(TAG, "HTTP server started (web UI %s)", cfg->web_base_path ? cfg->web_base_path : "not served");
   return ESP_OK;
 }

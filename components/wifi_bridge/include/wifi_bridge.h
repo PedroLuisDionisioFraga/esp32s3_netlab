@@ -40,6 +40,11 @@ extern "C"
      * and sets the bit of the new state (see notification_manager.h). NULL disables the signalling.
      */
     EventGroupHandle_t status_events;
+    /**
+     * Optional. Called just before the setup network is torn down, so HTTP sessions that ride on
+     * it can be closed cleanly instead of being aborted underneath the server.
+     */
+    void (*on_setup_closing)(void);
   } wifi_bridge_config_t;
 
   typedef struct

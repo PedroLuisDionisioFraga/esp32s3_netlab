@@ -472,6 +472,28 @@ function waitForResult() {
   return poll();
 }
 
+// The phone must rejoin the router by itself (a web page cannot switch Wi-Fi). Until then these
+// probes fail; the first address that answers gets opened.
+function redirectWhenReachable(urls) {
+  var deadline = Date.now() + 180000;
+
+  function probe(url) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 2000);
+    return fetch(url, { mode: 'no-cors', cache: 'no-store', signal: controller.signal })
+      .then(function () { clearTimeout(timer); return url; });
+  }
+
+  function loop() {
+    if (Date.now() > deadline) { return; }
+    Promise.race(urls.map(function (url) {
+      return probe(url).catch(function () { return new Promise(function () {}); }); // never settles on failure
+    })).then(function (url) { location.href = url; });
+    setTimeout(loop, 1500);
+  }
+  loop();
+}
+
 els.show.addEventListener('click', function () {
   var visible = els.password.type === 'password';
   els.password.type = visible ? 'text' : 'password';
@@ -509,6 +531,12 @@ els.form.addEventListener('submit', function (event) {
     .then(function (result) {
       var address = 'http://' + hostname + '.local/';
       if (result.ok) {
+        // The device's new address on the router, so the page can follow it (best effort).
+        api('/link', {}, 4000)
+          .catch(function () { return {}; })
+          .then(function (link) {
+            redirectWhenReachable(link.ip ? [address, 'http://' + link.ip + '/'] : [address]);
+          });
         done = true;
         updateControls();
         say('ok', 'Connected to ' + ssid,
@@ -516,6 +544,7 @@ els.form.addEventListener('submit', function (event) {
         return;
       }
       if (result.lost) {
+        redirectWhenReachable([address]);
         say('warn', 'Lost contact with the device',
             'If the setup network has disappeared it probably connected. Reconnect your phone to ' +
             ssid + ' and open:', address);

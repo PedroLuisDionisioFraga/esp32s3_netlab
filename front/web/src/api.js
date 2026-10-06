@@ -2,11 +2,11 @@
 // device shows up as "unreachable" instead of a spinner that never ends.
 const TIMEOUT_MS = 4000
 
-async function request(path, options = {}) {
+async function request(path, options = {}, base = '/api/v1') {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
-    const res = await fetch(`/api/v1${path}`, { ...options, signal: controller.signal })
+    const res = await fetch(`${base}${path}`, { ...options, signal: controller.signal })
     if (!res.ok) {
       throw new Error(`${res.status} ${(await res.text()).trim()}`)
     }
@@ -28,6 +28,18 @@ function postJson(path, body) {
     body: JSON.stringify(body),
   })
 }
+
+// /chat is not under /api/v1: it is the same URL as the chat page.
+export const sendChat = (message) =>
+  request(
+    '/chat',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    },
+    '',
+  )
 
 export const getSystemInfo = () => request('/system/info')
 export const getLink = () => request('/link')

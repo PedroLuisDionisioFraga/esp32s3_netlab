@@ -26,6 +26,9 @@ extern "C"
    */
   esp_err_t rest_server_start(const rest_server_config_t *cfg);
 
+  /** @brief Gracefully close every open HTTP session (clients just reconnect). Safe to call from any task. */
+  void rest_server_close_clients(void);
+
 #ifdef __cplusplus
 }
 #endif

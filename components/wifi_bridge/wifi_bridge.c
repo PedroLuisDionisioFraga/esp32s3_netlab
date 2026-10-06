@@ -13,6 +13,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "notification_manager.h"
 #include "sdkconfig.h"
 #include "wifi_bridge_priv.h"
@@ -22,7 +23,7 @@
 /* With the setup network open, retry rarely: every attempt scans off-channel and stutters the phone's link. */
 #define RECONNECT_DELAY_AP_US (15 * 1000 * 1000)
 /* Keep the setup network a little after going online so the phone can read the "connected" result. */
-#define AP_LINGER_US         (15 * 1000 * 1000)
+#define AP_LINGER_US         (4 * 1000 * 1000)
 #define PROVISION_TIMEOUT_US (25 * 1000 * 1000)
 #define FALLBACK_US          ((int64_t)CONFIG_WIFI_BRIDGE_FALLBACK_SECONDS * 1000 * 1000)
 
@@ -48,6 +49,7 @@ static esp_timer_handle_t s_ap_stop_timer;
 static esp_timer_handle_t s_prov_timer;
 static esp_timer_handle_t s_restart_timer;
 
+static void (*s_on_setup_closing)(void);   /* optional: lets the HTTP server close its sessions first */
 static EventGroupHandle_t s_status_events; /* optional: the LED worker waits on it */
 static int s_last_state = -1;
 
@@ -258,6 +260,14 @@ static void ap_disable(void)
   s_ap_ip[0] = '\0';
   publish_state_locked();
   unlock();
+
+  if (s_on_setup_closing)
+  {
+    /* Sessions on the setup network get a clean FIN now; otherwise the server logs
+     * "error in recv : 113" for each one when the interface vanishes under it. */
+    s_on_setup_closing();
+    vTaskDelay(pdMS_TO_TICKS(150)); /* the HTTP task closes them asynchronously */
+  }
   esp_wifi_set_mode(WIFI_MODE_STA);
 }
 
@@ -432,6 +442,9 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         esp_wifi_connect();
       }
       break;
+    case WIFI_EVENT_STA_CONNECTED:
+      esp_wifi_scan_stop(); /* joined the router: a scan in flight only steals airtime */
+      break;
     case WIFI_EVENT_STA_DISCONNECTED:
       on_sta_disconnected(data);
       break;
@@ -510,7 +523,10 @@ esp_err_t wifi_bridge_start(const wifi_bridge_config_t *cfg)
   ESP_RETURN_ON_FALSE(s_lock, ESP_ERR_NO_MEM, TAG, "no memory for the Wi-Fi lock");
 
   if (cfg)
+  {
     s_status_events = cfg->status_events;
+    s_on_setup_closing = cfg->on_setup_closing;
+  }
 
   s_sta_netif = esp_netif_create_default_wifi_sta();
   s_ap_netif = esp_netif_create_default_wifi_ap();
