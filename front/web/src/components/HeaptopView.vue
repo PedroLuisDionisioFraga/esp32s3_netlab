@@ -35,8 +35,8 @@ const { data: frame, error, refresh } = usePolling(
   { enabled: () => !paused.value },
 )
 
-// Like a key press in `ht top`, every change redraws at once. While paused that draws one more
-// frame, marked PAUSED in the top header, and the page stays frozen on it.
+// Like a key press in `ht top`, every change redraws at once. Paused, the device draws the sample
+// it froze again (marked PAUSED in the top header), so a new sort or view keeps the same data.
 watch([view, sort, refreshMs, paused], () => refresh())
 
 const sortable = () => view.value === 'top' || view.value === 'tasks'
@@ -90,12 +90,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
   <section class="card wide">
     <h2>Heaptop</h2>
 
-    <div class="row" role="tablist">
+    <div class="row" role="group" aria-label="View">
       <button
         v-for="v in VIEWS"
         :key="v.key"
-        role="tab"
-        :aria-selected="view === v.key"
+        :aria-pressed="view === v.key"
         :class="{ active: view === v.key }"
         @click="view = v.key"
       >
@@ -104,23 +103,40 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
     </div>
 
     <div class="row action">
-      <template v-if="sortable()">
-        <span class="hint">Sort</span>
+      <span v-if="sortable()" class="row" role="group" aria-label="Sort">
+        <span class="hint" aria-hidden="true">Sort</span>
         <button
           v-for="s in SORTS"
           :key="s.key"
           :title="`Key ${s.hotkey}`"
+          :aria-pressed="sort === s.key"
           :class="{ active: sort === s.key }"
           @click="sort = s.key"
         >
           {{ s.label }}
         </button>
-      </template>
-      <button title="Key p" :class="{ active: paused }" @click="togglePause">{{ paused ? 'Resume' : 'Pause' }}</button>
+      </span>
+      <button title="Key p" :aria-pressed="paused" :class="{ active: paused }" @click="togglePause">
+        {{ paused ? 'Resume' : 'Pause' }}
+      </button>
       <span class="row">
-        <button title="Key -" :disabled="refreshMs <= REFRESH_MIN_MS" @click="faster">−</button>
+        <button
+          title="Key -"
+          aria-label="Refresh faster"
+          :disabled="refreshMs <= REFRESH_MIN_MS"
+          @click="faster"
+        >
+          −
+        </button>
         <span class="hint">every {{ refreshMs }} ms</span>
-        <button title="Key +" :disabled="refreshMs >= REFRESH_MAX_MS" @click="slower">+</button>
+        <button
+          title="Key +"
+          aria-label="Refresh slower"
+          :disabled="refreshMs >= REFRESH_MAX_MS"
+          @click="slower"
+        >
+          +
+        </button>
       </span>
       <button :disabled="clearing" title="Like ht clear" @click="clearStats">Clear stats</button>
     </div>

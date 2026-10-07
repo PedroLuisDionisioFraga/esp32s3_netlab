@@ -19,7 +19,8 @@ CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
 CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
-# Heap per task and the leak check. Task tracking makes every malloc/free several times slower,
-# which can skew throughput measurements: turn these two off for speed tests (see README).
+# Heap per task and the leak check. Task tracking makes every malloc/free several times slower and
+# keeps a small record per live allocation in internal RAM: turn it off for speed tests (see README).
+# CONFIG_HEAP_TRACK_DELETED_TASKS stays off: it keeps a record of every task ever deleted, and the
+# captive-portal DNS task is created and deleted each time the setup network opens.
 CONFIG_HEAP_TASK_TRACKING=y
-CONFIG_HEAP_TRACK_DELETED_TASKS=y

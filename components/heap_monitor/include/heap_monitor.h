@@ -43,7 +43,8 @@ extern "C"
     heap_monitor_view_t view;
     heap_monitor_sort_t sort; /**< top and tasks only */
     uint32_t refresh_ms;      /**< top only: shown in its header */
-    bool paused;              /**< top only: adds "PAUSED" to its header */
+    bool paused;              /**< render the sample of the previous call again, like the p key of `ht top`
+                                   (top also shows "PAUSED") */
   } heap_monitor_opts_t;
 
   /**
@@ -54,7 +55,7 @@ extern "C"
   esp_err_t heap_monitor_init(void);
 
   /**
-   * @brief Render the latest sample exactly as the `ht` console command prints it.
+   * @brief Render the latest sample (or, paused, the previous one) exactly as `ht` prints it.
    *
    * A frame that does not fit is cut and ends with "... (output truncated)", like on the console.
    *
@@ -67,7 +68,8 @@ extern "C"
   /**
    * @brief Start a fresh measurement window, like `ht clear`.
    *
-   * Blocks until heaptop has published the cleared sample (normally a few ms).
+   * Blocks until heaptop has published the cleared sample (normally a few ms). The next render
+   * takes that sample, even when paused.
    *
    * @return ESP_OK; ESP_ERR_INVALID_STATE when heaptop is not running; ESP_ERR_TIMEOUT when the
    *         cleared sample came late (the clear still applies to a later sample).

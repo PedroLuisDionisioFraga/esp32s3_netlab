@@ -19,9 +19,10 @@ static const char *TAG = "heap_monitor";
 
 typedef struct
 {
-  SemaphoreHandle_t lock; /* guards snap and fails; NULL until init succeeded */
-  heaptop_snapshot_t *snap;
+  SemaphoreHandle_t lock;   /* guards everything below; NULL until init succeeded */
+  heaptop_snapshot_t *snap; /* the sample rendered last; seq 0 = none */
   heaptop_fail_t fails[HEAPTOP_FAIL_LEN];
+  uint16_t fail_count;
 } heap_monitor_priv_t;
 
 static heap_monitor_priv_t s_priv;
@@ -49,7 +50,7 @@ esp_err_t heap_monitor_init(void)
   ESP_RETURN_ON_ERROR(heaptop_init(NULL), TAG, "start heaptop");
 
   /* About 2 KB: too big for the HTTP server's stack, so it is copied here. */
-  s_priv.snap = malloc(sizeof(*s_priv.snap));
+  s_priv.snap = calloc(1, sizeof(*s_priv.snap));
   SemaphoreHandle_t lock = xSemaphoreCreateMutex();
   if (!s_priv.snap || !lock)
   {
@@ -81,8 +82,7 @@ static void render_view(heaptop_buf_t *b, const heap_monitor_opts_t *opts)
     {
       heaptop_thresholds_t th;
       heaptop_alerts_thresholds(&th);
-      const uint16_t n = heaptop_fails_copy(s_priv.fails, HEAPTOP_FAIL_LEN);
-      heaptop_render_health(b, s_priv.snap, &th, s_priv.fails, n);
+      heaptop_render_health(b, s_priv.snap, &th, s_priv.fails, s_priv.fail_count);
       break;
     }
     default:
@@ -102,7 +102,15 @@ esp_err_t heap_monitor_render(const heap_monitor_opts_t *opts, char *out, size_t
     return ESP_ERR_INVALID_STATE;
 
   xSemaphoreTake(s_priv.lock, portMAX_DELAY);
-  esp_err_t err = heaptop_get_snapshot(s_priv.snap);
+  /* Paused, like the p key of `ht top`: render the sample shown last again, so a new sort or view
+   * does not swap the data. The copy is shared, so another, unpaused browser tab moves it on. */
+  esp_err_t err = ESP_OK;
+  if (!opts->paused || s_priv.snap->seq == 0)
+  {
+    err = heaptop_get_snapshot(s_priv.snap);
+    if (err == ESP_OK)
+      s_priv.fail_count = heaptop_fails_copy(s_priv.fails, HEAPTOP_FAIL_LEN);
+  }
   if (err == ESP_OK && s_priv.snap->seq == 0)
     err = ESP_ERR_NOT_FOUND;
 
@@ -123,5 +131,12 @@ esp_err_t heap_monitor_clear(void)
 {
   if (!s_priv.lock)
     return ESP_ERR_INVALID_STATE;
-  return heaptop_clear();
+
+  esp_err_t err = heaptop_clear();
+
+  /* Drop the frozen sample: even a paused view shows the fresh window next. */
+  xSemaphoreTake(s_priv.lock, portMAX_DELAY);
+  s_priv.snap->seq = 0;
+  xSemaphoreGive(s_priv.lock);
+  return err;
 }

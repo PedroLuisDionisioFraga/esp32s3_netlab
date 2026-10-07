@@ -386,11 +386,12 @@ static const struct
   {"name", HEAP_MONITOR_SORT_NAME},
 };
 
-/* True when `key` is in the query. A value too long for `value` is cut, then rejected as unknown. */
+static const char *const k_heaptop_keys[] = {"view", "sort", "refresh", "paused"};
+
+/* True when `key` is in the query and its value fits in `value`. */
 static bool query_value(const char *query, const char *key, char *value, size_t len)
 {
-  esp_err_t err = httpd_query_key_value(query, key, value, len);
-  return err == ESP_OK || err == ESP_ERR_HTTPD_RESULT_TRUNC;
+  return httpd_query_key_value(query, key, value, len) == ESP_OK;
 }
 
 /* Fills `opts` from ?view=&sort=&refresh=&paused= (each one optional). On a bad value writes the
@@ -398,7 +399,7 @@ static bool query_value(const char *query, const char *key, char *value, size_t 
 static bool parse_heaptop_query(httpd_req_t *req, heap_monitor_opts_t *opts, char *problem, size_t len)
 {
   char query[QUERY_MAX];
-  char value[QUERY_VALUE_MAX];
+  char value[QUERY_VALUE_MAX] = "";
 
   esp_err_t err = httpd_req_get_url_query_str(req, query, sizeof(query));
   if (err == ESP_ERR_NOT_FOUND)
@@ -408,6 +409,16 @@ static bool parse_heaptop_query(httpd_req_t *req, heap_monitor_opts_t *opts, cha
   {
     snprintf(problem, len, "Query string too long");
     return false;
+  }
+
+  /* A value that does not fit is not copied at all (IDF leaves `value` as it was): reject it first. */
+  for (size_t k = 0; k < sizeof(k_heaptop_keys) / sizeof(k_heaptop_keys[0]); k++)
+  {
+    if (httpd_query_key_value(query, k_heaptop_keys[k], value, sizeof(value)) == ESP_ERR_HTTPD_RESULT_TRUNC)
+    {
+      snprintf(problem, len, "heaptop: value of '%s' is too long", k_heaptop_keys[k]);
+      return false;
+    }
   }
 
   if (query_value(query, "view", value, sizeof(value)))

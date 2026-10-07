@@ -142,7 +142,9 @@ command prints: the device renders it with heaptop's own code, so the columns ma
 - **Top / Heap / Tasks / Health:** `ht top` (live view), `ht heap`, `ht tasks <sort>`, `ht health`.
 - **Sort** (Top and Tasks), **Pause**, **−/+** (halve/double the refresh, 100 ms to 10 s): the keys of
   `ht top` work too: `c` `m` `s` `n` sort by CPU/memory/stack/name, `p` pauses, `+`/`-` change the refresh.
-  While paused, changing the view or the sort draws one new frame.
+  As in `ht top`, pausing freezes the sample on screen, and a new view or sort while paused redraws that
+  same sample. The device keeps one frozen copy for all browsers, so another tab that is not paused moves
+  it on.
 - **Clear stats:** like `ht clear`. Min free, task peaks, failures, trends and the leak check start over.
 
 What each number means is in the heaptop README (*Heap basics in one minute*, *Health checks*). Memory is
@@ -173,7 +175,7 @@ default (`menuconfig` -> *Status LED*), because a WS2812 at full power is blindi
 | `/api/v1/wifi/scan` | GET | nearby networks (takes a few seconds) |
 | `/api/v1/wifi/provision` | POST | `{"ssid":"...","password":"..."}`: try the network, save it only if it works (answers `202`, poll `wifi/status`) |
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
-| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=100..10000`, `paused=0\|1` (`refresh` and `paused` only change the top header) |
+| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=100..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
 | `/api/v1/heaptop/clear` | POST | start a fresh measurement window (`ht clear`) |
 
 `wifi/provision` only works while the setup network is open (`409` otherwise).
@@ -207,11 +209,18 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 - **No authentication on the dashboard/API.** Keep it on your home LAN and never port-forward it. Anyone
   on the LAN can call `wifi/forget` (which restarts the device into setup mode), and anyone who knows
   the setup network password can reconfigure the device while the setup network is open.
-- **Heap monitor costs.** heaptop's buffers take about 27 KB of internal RAM (no PSRAM is enabled) and
-  the page's buffers about 8 KB more. The options heaptop reads are on in `sdkconfig.defaults`. Heap
-  task tracking (`CONFIG_HEAP_TASK_TRACKING`) makes every `malloc`/`free` several times slower, which can
-  skew throughput measurements: turn it off in `menuconfig` for speed tests (the HEAP, PEAK and PSRAM
-  columns then show `-`). These options only reach an existing build after deleting `sdkconfig`.
+- **Heap monitor costs.** heaptop takes about 32 KB of internal RAM (no PSRAM is enabled): its buffers
+  plus its 4 KB sampler task. The boot line `HEAPTOP: started: ...` prints the measured number. The page's
+  buffers take about 8 KB more. The options heaptop reads are on in `sdkconfig.defaults`. Heap task
+  tracking (`CONFIG_HEAP_TASK_TRACKING`) makes every `malloc`/`free` several times slower, which can skew
+  throughput measurements. It also keeps about 25 bytes of bookkeeping per live allocation (the *used*
+  BLOCKS in the Heap tab) in internal RAM, and no task's HEAP column includes it. Turn it off in
+  `menuconfig` for speed tests; the HEAP, PEAK and PSRAM columns then show `-`. These options only reach
+  an existing build after deleting `sdkconfig`.
+- `CONFIG_HEAP_TRACK_DELETED_TASKS` stays off, so the Tasks table has no `X` rows for deleted tasks that
+  still hold heap. With it on, IDF keeps a record of every task ever deleted. The captive-portal DNS task
+  is created and deleted each time the setup network opens, so those records would pile up until they
+  push live tasks out of heaptop's table.
 - heaptop is pinned to exactly 0.2.0 (`components/heap_monitor/idf_component.yml`) because the page uses
   its internal text renderers. Check `heap_monitor.c` still builds before raising the version.
 - With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
