@@ -16,6 +16,11 @@
  *
  * Unlike a task that is simply deleted, stop() lets the task close its socket, so the
  * server can be started again later (the setup network opens and closes repeatedly).
+ *
+ * The task never deletes itself: then the idle task would free its stack, and with heap task
+ * tracking (CONFIG_HEAP_TASK_TRACKING, used by the heap monitor) that free can block the idle
+ * task and FreeRTOS asserts in prvSelectHighestPriorityTaskSMP (ESP-IDF 6.0.2). It suspends
+ * instead, and stop() deletes it, which frees the stack right there.
  */
 
 #define DNS_PORT        53
@@ -27,6 +32,8 @@
 #define DNS_CLASS_IN    1
 #define RECV_TIMEOUT_MS 250
 #define STOP_WAIT_MS    2000
+#define PARK_POLL_MS    20
+#define PARK_POLL_TRIES 10
 
 static const char *TAG = "dns_catch_all";
 
@@ -171,7 +178,7 @@ static void dns_task(void *arg)
   }
 
   xSemaphoreGive(s_done); /* dns_catch_all_stop() waits for this: the socket is closed by now */
-  vTaskDelete(NULL);
+  vTaskSuspend(NULL);     /* dns_catch_all_stop() deletes the task (see the top of this file) */
 }
 
 esp_err_t dns_catch_all_start(uint32_t ip_addr)
@@ -185,6 +192,9 @@ esp_err_t dns_catch_all_start(uint32_t ip_addr)
     if (!s_done)
       return ESP_ERR_NO_MEM;
   }
+
+  /* A task that stopped too late for the previous stop() gave this since: drop it. */
+  xSemaphoreTake(s_done, 0);
 
   s_ip = ip_addr;
   s_run = true;
@@ -202,6 +212,25 @@ void dns_catch_all_stop(void)
     return;
 
   s_run = false;
-  xSemaphoreTake(s_done, pdMS_TO_TICKS(STOP_WAIT_MS));
+  if (xSemaphoreTake(s_done, pdMS_TO_TICKS(STOP_WAIT_MS)) != pdTRUE)
+  {
+    /* It still parks itself once it gets out; only its stack is lost. */
+    ESP_LOGW(TAG, "Server task did not stop in time");
+    s_task = NULL;
+    return;
+  }
+
+  /* The task gives s_done right before it suspends itself: wait until it has. */
+  bool parked = false;
+  for (int i = 0; i < PARK_POLL_TRIES && !parked; i++)
+  {
+    parked = eTaskGetState(s_task) == eSuspended;
+    if (!parked)
+      vTaskDelay(pdMS_TO_TICKS(PARK_POLL_MS));
+  }
+  if (parked)
+    vTaskDelete(s_task); /* suspended, so its stack is freed here rather than by the idle task */
+  else
+    ESP_LOGW(TAG, "Server task did not park; left running");
   s_task = NULL;
 }

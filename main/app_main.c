@@ -8,6 +8,7 @@
 #include "nvs_flash.h"
 
 #include "chip_health.h"
+#include "heap_monitor.h"
 #include "notification_manager.h"
 #include "reset_button.h"
 #include "rest_server.h"
@@ -79,7 +80,8 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* The LED, the temperature sensor and the button are conveniences: the lab still runs without them. */
+    /* The LED, the temperature sensor, the heap monitor and the button are conveniences: the lab still
+     * runs without them. */
     esp_err_t err = notification_manager_init();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Status LED disabled (%s)", esp_err_to_name(err));
@@ -88,6 +90,11 @@ void app_main(void)
     err = chip_health_init();
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Chip temperature sensor disabled (%s)", esp_err_to_name(err));
+    }
+
+    err = heap_monitor_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Heap monitor disabled (%s)", esp_err_to_name(err));
     }
 
     err = reset_button_start();

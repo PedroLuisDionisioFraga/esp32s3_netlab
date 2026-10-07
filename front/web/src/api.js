@@ -10,7 +10,9 @@ async function request(path, options = {}, base = '/api/v1') {
     if (!res.ok) {
       throw new Error(`${res.status} ${(await res.text()).trim()}`)
     }
-    return await res.json()
+    // JSON everywhere, except heaptop frames, which are the console's plain text.
+    const type = res.headers.get('content-type') ?? ''
+    return type.includes('application/json') ? await res.json() : await res.text()
   } catch (err) {
     if (err.name === 'AbortError') {
       throw new Error('Device did not answer in time')
@@ -47,3 +49,8 @@ export const setLedColor = (r, g, b) => postJson('/led', { r, g, b })
 export const setLedAuto = () => postJson('/led', { mode: 'auto' })
 // Erases the saved router and restarts the device into Wi-Fi setup mode.
 export const forgetWifi = () => postJson('/wifi/forget', {})
+// The text the `ht` console command prints. `refresh` and `paused` only change the top header.
+export const getHeaptop = ({ view, sort, refresh, paused }) =>
+  request(`/heaptop?${new URLSearchParams({ view, sort, refresh, paused: paused ? 1 : 0 })}`)
+// Like `ht clear`: min free, peaks, failures and trends start over.
+export const clearHeaptop = () => postJson('/heaptop/clear', {})

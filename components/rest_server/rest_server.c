@@ -14,6 +14,7 @@
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "heap_monitor.h"
 #include "lwip/sockets.h"
 #include "notification_manager.h"
 #include "wifi_bridge.h"
@@ -25,6 +26,9 @@
 #define BODY_RECV_RETRIES 3
 #define SCAN_RESULTS_MAX  20
 #define RESTART_DELAY_MS  500
+#define QUERY_MAX         96
+#define QUERY_VALUE_MAX   16
+#define QUERY_ERROR_MAX   96
 
 static const char *TAG = "rest_server";
 
@@ -36,7 +40,8 @@ typedef struct
 {
   char base_path[BASE_PATH_MAX];
   char hostname[HOSTNAME_MAX];
-  char scratch[SCRATCH_BUFSIZE]; /* shared by all handlers: esp_http_server runs them on one task */
+  char scratch[SCRATCH_BUFSIZE];            /* shared by all handlers: esp_http_server runs them on one task */
+  char heaptop_text[HEAP_MONITOR_TEXT_MAX]; /* one heaptop frame */
 } rest_ctx_t;
 
 /* ---------- helpers ---------- */
@@ -357,6 +362,158 @@ static esp_err_t wifi_forget_post_handler(httpd_req_t *req)
   return send_json(req, root);
 }
 
+/* ---------- heaptop ---------- */
+
+static const struct
+{
+  const char *name;
+  heap_monitor_view_t view;
+} k_heaptop_views[] = {
+  {"top", HEAP_MONITOR_VIEW_TOP},
+  {"heap", HEAP_MONITOR_VIEW_HEAP},
+  {"tasks", HEAP_MONITOR_VIEW_TASKS},
+  {"health", HEAP_MONITOR_VIEW_HEALTH},
+};
+
+static const struct
+{
+  const char *name;
+  heap_monitor_sort_t sort;
+} k_heaptop_sorts[] = {
+  {"cpu", HEAP_MONITOR_SORT_CPU},
+  {"heap", HEAP_MONITOR_SORT_HEAP},
+  {"stack", HEAP_MONITOR_SORT_STACK},
+  {"name", HEAP_MONITOR_SORT_NAME},
+};
+
+/* True when `key` is in the query. A value too long for `value` is cut, then rejected as unknown. */
+static bool query_value(const char *query, const char *key, char *value, size_t len)
+{
+  esp_err_t err = httpd_query_key_value(query, key, value, len);
+  return err == ESP_OK || err == ESP_ERR_HTTPD_RESULT_TRUNC;
+}
+
+/* Fills `opts` from ?view=&sort=&refresh=&paused= (each one optional). On a bad value writes the
+ * reason to `problem` and returns false. */
+static bool parse_heaptop_query(httpd_req_t *req, heap_monitor_opts_t *opts, char *problem, size_t len)
+{
+  char query[QUERY_MAX];
+  char value[QUERY_VALUE_MAX];
+
+  esp_err_t err = httpd_req_get_url_query_str(req, query, sizeof(query));
+  if (err == ESP_ERR_NOT_FOUND)
+    return true; /* no query string: the defaults */
+
+  if (err != ESP_OK)
+  {
+    snprintf(problem, len, "Query string too long");
+    return false;
+  }
+
+  if (query_value(query, "view", value, sizeof(value)))
+  {
+    const size_t count = sizeof(k_heaptop_views) / sizeof(k_heaptop_views[0]);
+    size_t i = 0;
+    while (i < count && strcmp(value, k_heaptop_views[i].name) != 0) i++;
+    if (i == count)
+    {
+      snprintf(problem, len, "heaptop: unknown view '%s' (use top, heap, tasks or health)", value);
+      return false;
+    }
+    opts->view = k_heaptop_views[i].view;
+  }
+
+  if (query_value(query, "sort", value, sizeof(value)))
+  {
+    const size_t count = sizeof(k_heaptop_sorts) / sizeof(k_heaptop_sorts[0]);
+    size_t i = 0;
+    while (i < count && strcmp(value, k_heaptop_sorts[i].name) != 0) i++;
+    if (i == count)
+    {
+      snprintf(problem, len, "heaptop: unknown sort key '%s' (use cpu, heap, stack or name)", value);
+      return false;
+    }
+    opts->sort = k_heaptop_sorts[i].sort;
+  }
+
+  if (query_value(query, "refresh", value, sizeof(value)))
+  {
+    char *end = NULL;
+    unsigned long ms = strtoul(value, &end, 10);
+    if (end == value || *end != '\0' || ms < HEAP_MONITOR_REFRESH_MIN_MS || ms > HEAP_MONITOR_REFRESH_MAX_MS)
+    {
+      snprintf(problem,
+               len,
+               "heaptop: refresh must be %d..%d ms",
+               HEAP_MONITOR_REFRESH_MIN_MS,
+               HEAP_MONITOR_REFRESH_MAX_MS);
+      return false;
+    }
+    opts->refresh_ms = (uint32_t)ms;
+  }
+
+  if (query_value(query, "paused", value, sizeof(value)))
+  {
+    if (strcmp(value, "0") != 0 && strcmp(value, "1") != 0)
+    {
+      snprintf(problem, len, "heaptop: paused must be 0 or 1");
+      return false;
+    }
+    opts->paused = value[0] == '1';
+  }
+  return true;
+}
+
+/* Query: view=top|heap|tasks|health, sort=cpu|heap|stack|name, refresh=100..10000 (ms), paused=0|1.
+ * Answers the text the `ht` console command prints, rendered by heaptop itself. Plain text, so no
+ * JSON copy of it is made on the heap this page measures. */
+static esp_err_t heaptop_get_handler(httpd_req_t *req)
+{
+  rest_ctx_t *ctx = req->user_ctx;
+  heap_monitor_opts_t opts = {
+    .view = HEAP_MONITOR_VIEW_TOP,
+    .sort = HEAP_MONITOR_SORT_CPU,
+    .refresh_ms = HEAP_MONITOR_REFRESH_DEFAULT_MS,
+    .paused = false,
+  };
+
+  char problem[QUERY_ERROR_MAX];
+  if (!parse_heaptop_query(req, &opts, problem, sizeof(problem)))
+    return send_error(req, "400 Bad Request", problem);
+
+  esp_err_t err = heap_monitor_render(&opts, ctx->heaptop_text, sizeof(ctx->heaptop_text));
+  if (err == ESP_ERR_NOT_FOUND)
+    return send_error(req, "503 Service Unavailable", "heaptop: no sample yet, try again in a moment");
+
+  if (err != ESP_OK)
+    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
+
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_sendstr(req, ctx->heaptop_text);
+}
+
+/* Starts a fresh measurement window, like `ht clear`. */
+static esp_err_t heaptop_clear_post_handler(httpd_req_t *req)
+{
+  esp_err_t err = heap_monitor_clear();
+  if (err == ESP_ERR_TIMEOUT)
+    return send_error(req,
+                      "504 Gateway Timeout",
+                      "heaptop was slow to clear; the clear still applies to a later sample");
+
+  if (err != ESP_OK)
+    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "ok", true);
+  cJSON_AddStringToObject(root, "message", "stats cleared; stack high-water marks keep their since-boot minimum");
+  return send_json(req, root);
+}
+
 /* ---------- setup portal ---------- */
 
 static esp_err_t send_setup_page(httpd_req_t *req)
@@ -586,6 +743,8 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/provision", .method = HTTP_POST, .handler = wifi_provision_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/forget", .method = HTTP_POST, .handler = wifi_forget_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/heaptop", .method = HTTP_GET, .handler = heaptop_get_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/heaptop/clear", .method = HTTP_POST, .handler = heaptop_clear_post_handler, .user_ctx = ctx},
     {.uri = "/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
     /* Last, so the API routes above win over the wildcard. It always exists: the setup
      * portal needs it even when no web UI is mounted. */

@@ -11,3 +11,15 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Browsers send request headers larger than the 512-byte default (would answer HTTP 431)
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Heap monitor (/heaptop, heaptop component): the data sources it reads.
+# Per-task CPU % (64-bit esp_timer counters) and the core column.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+# Heap per task and the leak check. Task tracking makes every malloc/free several times slower,
+# which can skew throughput measurements: turn these two off for speed tests (see README).
+CONFIG_HEAP_TASK_TRACKING=y
+CONFIG_HEAP_TRACK_DELETED_TASKS=y
