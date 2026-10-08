@@ -47,25 +47,46 @@ Boot sequence (`main/app_main.c`):
 
 - **ESP-IDF v6.0.2**, installed **with the `esp32s3` target** (the manifest in `main/idf_component.yml`
   refuses older versions).
-- Node.js and pnpm for the web UI.
+- To build the web UI, either **Docker** (no Node.js needed, uses `build.sh` / `build.ps1`) or
+  Node.js and pnpm.
 
 ## Build and flash
 
-Run these from an ESP-IDF shell, in this folder.
+### 1. Build the web UI
+
+Output goes to `front/web/dist`, which is flashed into the `www` LittleFS partition. Pick one:
+
+**Docker (recommended).** Run from the repo root. The script starts Docker Desktop if it is not running.
 
 ```powershell
-# 1. Build the web UI (output: front/web/dist, flashed into the "www" LittleFS partition)
+.\build.ps1          # PowerShell
+.\build.ps1 -Clean   # delete dist, rebuild the image without cache
+```
+
+```sh
+./build.sh           # Git Bash, macOS, Linux
+./build.sh --clean   # delete dist, rebuild the image without cache
+```
+
+**Local Node.js.**
+
+```powershell
 cd front/web
 pnpm install
 pnpm build
 cd ../..
+```
 
-# 2. Build, flash, monitor
+### 2. Build, flash, monitor
+
+Run from an ESP-IDF shell, in the repo root.
+
+```powershell
 idf.py set-target esp32s3
 idf.py -p COMx build flash monitor
 ```
 
-No credentials are needed at build time. Rebuild the web UI (`pnpm build`) whenever you change
+No credentials are needed at build time. Rebuild the web UI (step 1) whenever you change
 something in `front/web`, then flash again.
 
 ### Working on the web UI without reflashing
@@ -198,7 +219,7 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 | Setup says "The router did not accept the password" | Retype it (use *Show password*). Nothing was saved. |
 | `netlab.local` does not resolve | Use the IP from the serial log (`Got IP ...`). Some networks or systems block mDNS. |
 | LED stays red | The saved router cannot be reached. After 90 s the setup network opens so you can pick another. |
-| CMake error "front/web/dist doesn't exist" | Run `pnpm install && pnpm build` in `front/web`, or disable *Flash the web UI* in `menuconfig`. |
+| CMake error "front/web/dist doesn't exist" | Run `build.ps1` / `build.sh` (or `pnpm install && pnpm build` in `front/web`), or disable *Flash the web UI* in `menuconfig`. |
 | Log says `Cannot mount 'www' partition` | The web UI was not flashed, so only the API and the setup page are served. Rebuild with *Flash the web UI* enabled and flash again. |
 | Page shows *Device unreachable* | The S3 is offline or you are on a different network. Check the LED and the serial log. |
 | Heaptop page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
