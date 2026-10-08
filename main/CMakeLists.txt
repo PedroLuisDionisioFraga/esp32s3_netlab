@@ -1,7 +1,7 @@
 idf_component_register(SRCS "app_main.c"
                             "reset_button.c"
                        PRIV_REQUIRES nvs_flash esp_netif esp_event esp_driver_gpio freertos
-                                     chip_health notification_manager wifi_bridge rest_server
+                                     chip_health heap_monitor notification_manager wifi_bridge rest_server
                        INCLUDE_DIRS ".")
 
 if(CONFIG_NETLAB_DEPLOY_WEB_PAGES)

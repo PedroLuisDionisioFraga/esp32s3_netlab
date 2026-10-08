@@ -16,7 +16,7 @@ you pick your router from your phone, and it remembers it. No rebuild, no reflas
 Boot sequence (`main/app_main.c`):
 
 1. Initialize NVS, the network stack and the default event loop.
-2. Turn the status LED on (blue) and start the chip temperature sensor and the reset button.
+2. Turn the status LED on (blue) and start the chip temperature sensor, the heap monitor and the reset button.
 3. Start mDNS (`netlab.local`) and mount the `www` LittleFS partition that holds the web UI.
 4. Start Wi-Fi (`wifi_bridge`):
    - **A network is saved in NVS:** join it (amber, then green once it has an IP). If the link is lost it
@@ -29,6 +29,7 @@ Boot sequence (`main/app_main.c`):
 |---|---|
 | `components/wifi_bridge` | Wi-Fi manager: saved network in NVS, reconnect, setup network, captive-portal DNS, provisioning, scan. The router-to-AP bridge (NAT) comes in milestone 4. |
 | `components/chip_health` | Internal temperature sensor, heap, uptime, reset reason. |
+| `components/heap_monitor` | Runs [heaptop](https://components.espressif.com/components/pedroluisdionisiofraga/heaptop) and renders its `ht` console views as text for the `/heaptop` page. |
 | `components/notification_manager` | Owns the onboard LED. One worker task is the only LED writer; `wifi_bridge` sets a `NOTIF_EVT_CONN_*` event bit and the worker shows the matching status color. The web UI's manual color overrides it. |
 | `components/led_device` | Hardware layer for the WS2812 (set color, off, brightness cap). Only `notification_manager` uses it. |
 | `components/rest_server` | HTTP server: JSON API, the built-in Wi-Fi setup page, static files from LittleFS. |
@@ -46,25 +47,46 @@ Boot sequence (`main/app_main.c`):
 
 - **ESP-IDF v6.0.2**, installed **with the `esp32s3` target** (the manifest in `main/idf_component.yml`
   refuses older versions).
-- Node.js and pnpm for the web UI.
+- To build the web UI, either **Docker** (no Node.js needed, uses `build.sh` / `build.ps1`) or
+  Node.js and pnpm.
 
 ## Build and flash
 
-Run these from an ESP-IDF shell, in this folder.
+### 1. Build the web UI
+
+Output goes to `front/web/dist`, which is flashed into the `www` LittleFS partition. Pick one:
+
+**Docker (recommended).** Run from the repo root. The script starts Docker Desktop if it is not running.
 
 ```powershell
-# 1. Build the web UI (output: front/web/dist, flashed into the "www" LittleFS partition)
+.\build.ps1          # PowerShell
+.\build.ps1 -Clean   # delete dist, rebuild the image without cache
+```
+
+```sh
+./build.sh           # Git Bash, macOS, Linux
+./build.sh --clean   # delete dist, rebuild the image without cache
+```
+
+**Local Node.js.**
+
+```powershell
 cd front/web
 pnpm install
 pnpm build
 cd ../..
+```
 
-# 2. Build, flash, monitor
+### 2. Build, flash, monitor
+
+Run from an ESP-IDF shell, in the repo root.
+
+```powershell
 idf.py set-target esp32s3
 idf.py -p COMx build flash monitor
 ```
 
-No credentials are needed at build time. Rebuild the web UI (`pnpm build`) whenever you change
+No credentials are needed at build time. Rebuild the web UI (step 1) whenever you change
 something in `front/web`, then flash again.
 
 ### Working on the web UI without reflashing
@@ -132,6 +154,23 @@ Open `http://netlab.local/` from a device on the same network.
   address, gateway and netmask the S3 got, and the **Change network…** button.
 - **Onboard LED:** pick a color, press **Off**, or press **Auto** to go back to the status colors.
 
+### Heaptop page
+
+Open `http://netlab.local/heaptop` (or **Heaptop** in the header). It shows the memory and CPU monitor
+[heaptop](https://github.com/PedroLuisDionisioFraga/esp32s3_heaptop) with the same text its `ht` serial
+command prints: the device renders it with heaptop's own code, so the columns match the heaptop README.
+
+- **Top / Heap / Tasks / Health:** `ht top` (live view), `ht heap`, `ht tasks <sort>`, `ht health`.
+- **Sort** (Top and Tasks), **Pause**, **−/+** (50 ms steps up to 200 ms, 200 ms up to 3 s, 500 ms up to 5 s, then 1 s; 50 ms to 10 s): the keys of
+  `ht top` work too: `c` `m` `s` `n` sort by CPU/memory/stack/name, `p` pauses, `+`/`-` change the refresh.
+  As in `ht top`, pausing freezes the sample on screen, and a new view or sort while paused redraws that
+  same sample. The device keeps one frozen copy for all browsers, so another tab that is not paused moves
+  it on.
+- **Clear stats:** like `ht clear`. Min free, task peaks, failures, trends and the leak check start over.
+
+What each number means is in the heaptop README (*Heap basics in one minute*, *Health checks*). Memory is
+charged to the task that allocated it, so the page's own requests show up under `httpd`.
+
 ## LED colors
 
 | Color | Meaning |
@@ -157,6 +196,8 @@ default (`menuconfig` -> *Status LED*), because a WS2812 at full power is blindi
 | `/api/v1/wifi/scan` | GET | nearby networks (takes a few seconds) |
 | `/api/v1/wifi/provision` | POST | `{"ssid":"...","password":"..."}`: try the network, save it only if it works (answers `202`, poll `wifi/status`) |
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
+| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=50..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
+| `/api/v1/heaptop/clear` | POST | start a fresh measurement window (`ht clear`) |
 
 `wifi/provision` only works while the setup network is open (`409` otherwise).
 
@@ -165,6 +206,7 @@ curl http://netlab.local/api/v1/system/info
 curl -X POST http://netlab.local/api/v1/led -d '{"r":0,"g":0,"b":255}'
 curl -X POST http://netlab.local/api/v1/led -d '{"mode":"auto"}'
 curl http://netlab.local/api/v1/wifi/status
+curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 ```
 
 ## Troubleshooting
@@ -177,15 +219,33 @@ curl http://netlab.local/api/v1/wifi/status
 | Setup says "The router did not accept the password" | Retype it (use *Show password*). Nothing was saved. |
 | `netlab.local` does not resolve | Use the IP from the serial log (`Got IP ...`). Some networks or systems block mDNS. |
 | LED stays red | The saved router cannot be reached. After 90 s the setup network opens so you can pick another. |
-| CMake error "front/web/dist doesn't exist" | Run `pnpm install && pnpm build` in `front/web`, or disable *Flash the web UI* in `menuconfig`. |
+| CMake error "front/web/dist doesn't exist" | Run `build.ps1` / `build.sh` (or `pnpm install && pnpm build` in `front/web`), or disable *Flash the web UI* in `menuconfig`. |
 | Log says `Cannot mount 'www' partition` | The web UI was not flashed, so only the API and the setup page are served. Rebuild with *Flash the web UI* enabled and flash again. |
 | Page shows *Device unreachable* | The S3 is offline or you are on a different network. Check the LED and the serial log. |
+| Heaptop page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
+| Heaptop HEAP/PEAK/PSRAM columns show `-` | The build is not using `sdkconfig.defaults`' heap options: delete `sdkconfig` and build again, or enable *Heap task tracking* in `menuconfig`. |
 
 ## Notes
 
 - **No authentication on the dashboard/API.** Keep it on your home LAN and never port-forward it. Anyone
   on the LAN can call `wifi/forget` (which restarts the device into setup mode), and anyone who knows
   the setup network password can reconfigure the device while the setup network is open.
+- **Heap monitor costs.** heaptop takes about 32 KB of internal RAM (no PSRAM is enabled): its buffers
+  plus its 4 KB sampler task. The boot line `HEAPTOP: started: ...` prints the measured number. The page's
+  buffers take about 8 KB more. The options heaptop reads are on in `sdkconfig.defaults`. Heap task
+  tracking (`CONFIG_HEAP_TASK_TRACKING`) makes every `malloc`/`free` several times slower, which can skew
+  throughput measurements. It also keeps about 25 bytes of bookkeeping per live allocation (the *used*
+  BLOCKS in the Heap tab) in internal RAM, and no task's HEAP column includes it. Turn it off in
+  `menuconfig` for speed tests; the HEAP, PEAK and PSRAM columns then show `-`. These options only reach
+  an existing build after deleting `sdkconfig`.
+- `CONFIG_HEAP_TRACK_DELETED_TASKS` stays off, so the Tasks table has no `X` rows for deleted tasks that
+  still hold heap. With it on, IDF keeps a record of every task ever deleted. The captive-portal DNS task
+  is created and deleted each time the setup network opens, so those records would pile up until they
+  push live tasks out of heaptop's table.
+- heaptop is pinned to exactly 0.3.0 (`components/heap_monitor/idf_component.yml`) because the page uses
+  its internal text renderers. Check `heap_monitor.c` still builds before raising the version.
+- With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
+  *Caveats*): tasks suspend themselves and whoever stops them deletes them, as `dns_catch_all.c` does.
 - The Wi-Fi station keeps retrying forever, and modem power save is disabled so latency
   measurements are not skewed.
 

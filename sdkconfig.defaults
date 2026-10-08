@@ -6,8 +6,26 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 
+# 8 MB octal PSRAM (N16R8 boards); other variants: remove these three lines
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
 # 240 MHz gives the best Wi-Fi throughput on the S3 (same as the IDF benchmark setup)
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
 # Browsers send request headers larger than the 512-byte default (would answer HTTP 431)
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Heap monitor (/heaptop, heaptop component): the data sources it reads.
+# Per-task CPU % (64-bit esp_timer counters) and the core column.
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_COUNTER_TYPE_U64=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
+# Heap per task and the leak check. Task tracking makes every malloc/free several times slower and
+# keeps a small record per live allocation in internal RAM: turn it off for speed tests (see README).
+# CONFIG_HEAP_TRACK_DELETED_TASKS stays off: it keeps a record of every task ever deleted, and the
+# captive-portal DNS task is created and deleted each time the setup network opens.
+CONFIG_HEAP_TASK_TRACKING=y

@@ -10,6 +10,8 @@
   --ok: #15803d;
   --warn: #b45309;
   --bad: #b91c1c;
+  --term-bg: #17212b;
+  --term-text: #e6ebf0;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color-scheme: light dark;
 }
@@ -25,6 +27,8 @@
     --ok: #4ade80;
     --warn: #fbbf24;
     --bad: #f87171;
+    --term-bg: #0a0e11;
+    --term-text: #e6ebf0;
   }
 }
 
@@ -189,4 +193,34 @@ button:hover:not(:disabled) {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* A card across the whole grid. min-width: 0 lets wide content scroll inside it instead of
+   widening the grid (and the page). */
+.card.wide {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+/* heaptop frames: the serial console's text, column for column. */
+.terminal {
+  margin: 12px 0 0;
+  padding: 12px;
+  overflow-x: auto;
+  white-space: pre;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  background: var(--term-bg);
+  color: var(--term-text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.terminal.stale {
+  opacity: 0.5;
 }
