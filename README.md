@@ -157,7 +157,7 @@ Open `http://netlab.local/` from a device on the same network.
 ### Heaptop page
 
 Open `http://netlab.local/heaptop` (or **Heaptop** in the header). It shows the memory and CPU monitor
-[heaptop](https://github.com/PedroLuisDionisioFraga/esp32s3-heaptop) with the same text its `ht` serial
+[heaptop](https://github.com/PedroLuisDionisioFraga/esp32s3_heaptop) with the same text its `ht` serial
 command prints: the device renders it with heaptop's own code, so the columns match the heaptop README.
 
 - **Top / Heap / Tasks / Health:** `ht top` (live view), `ht heap`, `ht tasks <sort>`, `ht health`.
