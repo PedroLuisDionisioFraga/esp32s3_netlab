@@ -242,7 +242,7 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
   still hold heap. With it on, IDF keeps a record of every task ever deleted. The captive-portal DNS task
   is created and deleted each time the setup network opens, so those records would pile up until they
   push live tasks out of heaptop's table.
-- heaptop is pinned to exactly 0.2.0 (`components/heap_monitor/idf_component.yml`) because the page uses
+- heaptop is pinned to exactly 0.3.0 (`components/heap_monitor/idf_component.yml`) because the page uses
   its internal text renderers. Check `heap_monitor.c` still builds before raising the version.
 - With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
   *Caveats*): tasks suspend themselves and whoever stops them deletes them, as `dns_catch_all.c` does.

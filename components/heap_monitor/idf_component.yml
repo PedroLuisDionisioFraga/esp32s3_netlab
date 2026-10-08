@@ -1,4 +1,4 @@
 ## IDF Component Manager Manifest File
 dependencies:
   # Exact version: heap_monitor.c uses heaptop's private headers (src/), which can change in any release.
-  pedroluisdionisiofraga/heaptop: "==0.2.0"
+  pedroluisdionisiofraga/heaptop: "==0.3.0"
