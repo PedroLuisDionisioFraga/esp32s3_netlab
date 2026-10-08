@@ -475,7 +475,7 @@ static bool parse_heaptop_query(httpd_req_t *req, heap_monitor_opts_t *opts, cha
   return true;
 }
 
-/* Query: view=top|heap|tasks|health, sort=cpu|heap|stack|name, refresh=100..10000 (ms), paused=0|1.
+/* Query: view=top|heap|tasks|health, sort=cpu|heap|stack|name, refresh=50..10000 (ms), paused=0|1.
  * Answers the text the `ht` console command prints, rendered by heaptop itself. Plain text, so no
  * JSON copy of it is made on the heap this page measures. */
 static esp_err_t heaptop_get_handler(httpd_req_t *req)

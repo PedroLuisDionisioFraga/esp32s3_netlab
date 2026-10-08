@@ -3,9 +3,11 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { clearHeaptop, getHeaptop } from '../api'
 import { usePolling } from '../usePolling'
 
-// Same range and steps as `ht top`: + doubles the refresh, - halves it.
-const REFRESH_MIN_MS = 100
+// + and - move the refresh by 50 ms up to 200, 200 ms up to 3 s, 500 ms up to 5 s, then 1 s.
+const REFRESH_MIN_MS = 50
 const REFRESH_MAX_MS = 10000
+const stepUp = (ms) => (ms < 200 ? 50 : ms < 3000 ? 200 : ms < 5000 ? 500 : 1000)
+const stepDown = (ms) => (ms <= 200 ? 50 : ms <= 3000 ? 200 : ms <= 5000 ? 500 : 1000)
 
 const VIEWS = [
   { key: 'top', label: 'Top' },
@@ -42,11 +44,11 @@ watch([view, sort, refreshMs, paused], () => refresh())
 const sortable = () => view.value === 'top' || view.value === 'tasks'
 
 function slower() {
-  refreshMs.value = Math.min(refreshMs.value * 2, REFRESH_MAX_MS)
+  refreshMs.value = Math.min(refreshMs.value + stepUp(refreshMs.value), REFRESH_MAX_MS)
 }
 
 function faster() {
-  refreshMs.value = Math.max(Math.floor(refreshMs.value / 2), REFRESH_MIN_MS)
+  refreshMs.value = Math.max(refreshMs.value - stepDown(refreshMs.value), REFRESH_MIN_MS)
 }
 
 function togglePause() {

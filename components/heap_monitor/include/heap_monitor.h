@@ -17,7 +17,7 @@ extern "C"
 
 /** Refresh default and range of `ht top`; it only changes the "refresh" field of the top header. */
 #define HEAP_MONITOR_REFRESH_DEFAULT_MS 1000
-#define HEAP_MONITOR_REFRESH_MIN_MS     100
+#define HEAP_MONITOR_REFRESH_MIN_MS     50
 #define HEAP_MONITOR_REFRESH_MAX_MS     10000
 
   /** Which `ht` subcommand to render. */

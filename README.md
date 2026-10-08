@@ -161,7 +161,7 @@ Open `http://netlab.local/heaptop` (or **Heaptop** in the header). It shows the 
 command prints: the device renders it with heaptop's own code, so the columns match the heaptop README.
 
 - **Top / Heap / Tasks / Health:** `ht top` (live view), `ht heap`, `ht tasks <sort>`, `ht health`.
-- **Sort** (Top and Tasks), **Pause**, **−/+** (halve/double the refresh, 100 ms to 10 s): the keys of
+- **Sort** (Top and Tasks), **Pause**, **−/+** (50 ms steps up to 200 ms, 200 ms up to 3 s, 500 ms up to 5 s, then 1 s; 50 ms to 10 s): the keys of
   `ht top` work too: `c` `m` `s` `n` sort by CPU/memory/stack/name, `p` pauses, `+`/`-` change the refresh.
   As in `ht top`, pausing freezes the sample on screen, and a new view or sort while paused redraws that
   same sample. The device keeps one frozen copy for all browsers, so another tab that is not paused moves
@@ -196,7 +196,7 @@ default (`menuconfig` -> *Status LED*), because a WS2812 at full power is blindi
 | `/api/v1/wifi/scan` | GET | nearby networks (takes a few seconds) |
 | `/api/v1/wifi/provision` | POST | `{"ssid":"...","password":"..."}`: try the network, save it only if it works (answers `202`, poll `wifi/status`) |
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
-| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=100..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
+| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=50..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
 | `/api/v1/heaptop/clear` | POST | start a fresh measurement window (`ht clear`) |
 
 `wifi/provision` only works while the setup network is open (`409` otherwise).
