@@ -6,6 +6,11 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 
+# 8 MB octal PSRAM (N16R8 boards); other variants: remove these three lines
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
 # 240 MHz gives the best Wi-Fi throughput on the S3 (same as the IDF benchmark setup)
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 
