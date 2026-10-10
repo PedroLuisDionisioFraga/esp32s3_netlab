@@ -261,7 +261,7 @@ curl.exe http://netlab.local/api/v1/memory -H "Authorization: Bearer $t"
 | Sent back to the login after a while | The session ended (30 minutes without use) or the board restarted: sign in again. |
 | Memory page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
 | The Tasks table has no Heap / Peak columns, or the leak check says *Not measured* | The build is not using `sdkconfig.defaults`' heap options: delete `sdkconfig` and build again, or enable *Heap task tracking* in `menuconfig`. |
-| CMake cannot find heaptop 0.4.0 | `components/heap_monitor/idf_component.yml` points at a local clone of heaptop (`../../../esp32s3_heaptop`) until 0.4.0 is on the registry. Clone it there, or switch the dependency to `^0.4.0` once it is published. |
+| CMake cannot find heaptop `^0.4.0`, or `heaptop_json.h` is missing | The build resolved an older heaptop (the Memory page needs 0.4.0 or newer). Run `idf.py reconfigure` so `dependencies.lock` picks up the registry version, and delete `managed_components/pedroluisdionisiofraga__heaptop` if it still holds an old copy. |
 
 ## Notes
 
@@ -282,8 +282,8 @@ curl.exe http://netlab.local/api/v1/memory -H "Authorization: Bearer $t"
   is created and deleted each time the setup network opens, so those records would pile up until they
   push live tasks out of heaptop's table.
 - The Memory page needs heaptop 0.4.0, which adds the public JSON export (`heaptop_json_snapshot()`); no
-  private header is used any more. Until 0.4.0 is on the registry, `components/heap_monitor/idf_component.yml`
-  points at a local clone; then it becomes `^0.4.0`.
+  private header is used any more. `components/heap_monitor/idf_component.yml` asks the registry for `^0.4.0`
+  (a caret on 0.x does not reach the next minor, so a `^0.3.x` range would not accept it).
 - With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
   *Caveats*): tasks suspend themselves and whoever stops them deletes them, as `dns_catch_all.c` does.
 - The Wi-Fi station keeps retrying forever, and modem power save is disabled so latency
