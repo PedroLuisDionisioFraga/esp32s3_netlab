@@ -7,10 +7,13 @@
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_netif.h"
+#include "esp_netif_net_stack.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "esp_wifi_ap_get_sta_list.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -54,7 +57,8 @@ static EventGroupHandle_t s_status_events; /* optional: the LED worker waits on 
 static int s_last_state = -1;
 
 static volatile bool s_online;
-static volatile bool s_ap_active;
+static volatile bool s_ap_active;    /* the setup network is open */
+static volatile bool s_router_active; /* the lab network is open (router lab mode); never with the setup one */
 static bool s_sta_failed; /* the last attempt to reach the saved network failed */
 static volatile uint8_t s_last_disconnect_reason;
 static int s_ap_clients;
@@ -224,6 +228,9 @@ static void ap_services_start(void)
    * has to be stopped while an option is set. */
   esp_netif_dhcps_stop(s_ap_netif); /* already stopped is fine */
   esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI, s_ap_uri, strlen(s_ap_uri));
+  /* Clients must ask the captive DNS below, even if the lab network offered the uplink's DNS before. */
+  uint8_t offer_dns = 0;
+  esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer_dns, sizeof(offer_dns));
   esp_netif_dhcps_start(s_ap_netif);
 
   if (dns_catch_all_start(ip_info.ip.addr) != ESP_OK)
@@ -233,11 +240,179 @@ static void ap_services_start(void)
   ESP_LOGW(TAG, "Setup network '%s' is open: join it and go to http://%s/", s_ap_ssid, s_ap_ip);
 }
 
+/* ---------- lab network (router lab mode) ---------- */
+
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+
+_Static_assert(sizeof(CONFIG_WIFI_BRIDGE_ROUTER_SSID) >= 2 && sizeof(CONFIG_WIFI_BRIDGE_ROUTER_SSID) <= 33,
+               "Lab network name must be 1 to 32 characters");
+_Static_assert(sizeof(CONFIG_WIFI_BRIDGE_ROUTER_PASSWORD) >= 9 && sizeof(CONFIG_WIFI_BRIDGE_ROUTER_PASSWORD) <= 64,
+               "Lab network password must be 8 to 63 characters");
+
+static esp_timer_handle_t s_router_timer;
+static char s_router_problem[sizeof(((wifi_bridge_router_status_t *)0)->problem)];
+
+/* The lab and setup networks share the soft-AP interface, so they share its address. */
+static esp_err_t router_set_ap_address(void)
+{
+  esp_netif_ip_info_t info = {0};
+  ESP_RETURN_ON_ERROR(esp_netif_str_to_ip4(CONFIG_WIFI_BRIDGE_ROUTER_IP, &info.ip),
+                      TAG,
+                      "bad lab network address '%s'",
+                      CONFIG_WIFI_BRIDGE_ROUTER_IP);
+  info.gw = info.ip;
+  info.netmask.addr = ESP_IP4TOADDR(255, 255, 255, 0);
+
+  esp_netif_ip_info_t current;
+  if (esp_netif_get_ip_info(s_ap_netif, &current) == ESP_OK && current.ip.addr == info.ip.addr)
+    return ESP_OK; /* the default 192.168.4.1: nothing to change */
+
+  esp_netif_dhcps_stop(s_ap_netif); /* not running yet; the address only changes while it is stopped */
+  return esp_netif_set_ip_info(s_ap_netif, &info);
+}
+
+/* Runs once the soft-AP interface is up as the lab network: DHCP, DNS and NAT for its clients. */
+static void router_services_start(void)
+{
+  /* Clients ask the uplink's DNS server themselves, through the NAT: no captive DNS here. DHCP
+   * option 114 may still name the setup page (esp_netif cannot unset it); a phone that reads it
+   * gets the dashboard, not a portal API, and its connectivity check reaches the internet. */
+  esp_netif_dhcps_stop(s_ap_netif);
+  esp_netif_dns_info_t dns;
+  uint8_t offer_dns = 1;
+  if (esp_netif_get_dns_info(s_sta_netif, ESP_NETIF_DNS_MAIN, &dns) == ESP_OK && dns.ip.u_addr.ip4.addr != 0)
+  {
+    esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns);
+    esp_netif_dhcps_option(s_ap_netif, ESP_NETIF_OP_SET, ESP_NETIF_DOMAIN_NAME_SERVER, &offer_dns, sizeof(offer_dns));
+  }
+  else
+  {
+    ESP_LOGW(TAG, "The uplink gave no DNS server: lab clients can reach addresses, not names");
+  }
+  esp_netif_dhcps_start(s_ap_netif);
+
+  esp_netif_set_default_netif(s_sta_netif); /* the uplink keeps the default route */
+  if (esp_netif_napt_enable(s_ap_netif) != ESP_OK)
+  {
+    ESP_LOGE(TAG, "NAT did not start: lab clients get an address but no internet");
+  }
+  traffic_observer_attach(esp_netif_get_netif_impl(s_ap_netif));
+  ESP_LOGW(TAG, "Lab network '%s' is open and routed to the uplink", CONFIG_WIFI_BRIDGE_ROUTER_SSID);
+}
+
+static void router_close(void)
+{
+  lock();
+  const bool was_active = s_router_active;
+  s_router_active = false;
+  unlock();
+  if (!was_active)
+    return;
+
+  ESP_LOGW(TAG, "Closing the lab network: its clients are offline until the uplink is back");
+  traffic_observer_attach(NULL);
+  esp_netif_napt_disable(s_ap_netif);
+  esp_wifi_set_mode(WIFI_MODE_STA); /* the DHCP server stops with the interface */
+  lock();
+  s_ap_clients = 0;
+  unlock();
+}
+
+static void router_open(void)
+{
+  wifi_ap_record_t uplink;
+  esp_netif_ip_info_t sta;
+  esp_netif_ip_info_t ap;
+  if (esp_wifi_sta_get_ap_info(&uplink) != ESP_OK || esp_netif_get_ip_info(s_sta_netif, &sta) != ESP_OK ||
+      esp_netif_get_ip_info(s_ap_netif, &ap) != ESP_OK)
+    return; /* the uplink just went; the sync its event requested closes everything */
+
+  /* Never under the uplink's name, and never on a subnet the NAT could not tell apart from it. */
+  const char *problem = "";
+  const uint32_t mask = sta.netmask.addr & ap.netmask.addr;
+  if (strcmp((const char *)uplink.ssid, CONFIG_WIFI_BRIDGE_ROUTER_SSID) == 0)
+    problem = "The lab network name is the uplink's name: choose another one";
+  else if ((sta.ip.addr & mask) == (ap.ip.addr & mask))
+    problem = "The uplink uses the lab network's subnet: change the lab network address";
+
+  lock();
+  strlcpy(s_router_problem, problem, sizeof(s_router_problem));
+  unlock();
+  if (problem[0] != '\0')
+  {
+    ESP_LOGE(TAG, "Lab network not opened. %s (menuconfig -> Wi-Fi bridge -> Router lab mode)", problem);
+    return;
+  }
+
+  wifi_config_t cfg = {0};
+  const size_t ssid_len = strlen(CONFIG_WIFI_BRIDGE_ROUTER_SSID);
+  memcpy(cfg.ap.ssid, CONFIG_WIFI_BRIDGE_ROUTER_SSID, ssid_len); /* up to 32 bytes, no terminator needed */
+  cfg.ap.ssid_len = (uint8_t)ssid_len;
+  strlcpy((char *)cfg.ap.password, CONFIG_WIFI_BRIDGE_ROUTER_PASSWORD, sizeof(cfg.ap.password));
+  cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
+  cfg.ap.channel = uplink.primary; /* one radio: the soft AP sits on the uplink's channel */
+  cfg.ap.max_connection = CONFIG_WIFI_BRIDGE_ROUTER_MAX_CLIENTS;
+
+  lock();
+  s_router_active = true; /* first, so the AP_START event starts the lab services, not the portal */
+  unlock();
+  esp_err_t err = esp_wifi_set_mode(WIFI_MODE_APSTA);
+  if (err == ESP_OK)
+  {
+    err = esp_wifi_set_config(WIFI_IF_AP, &cfg);
+  }
+  if (err != ESP_OK)
+  {
+    ESP_LOGE(TAG, "Could not open the lab network: %s", esp_err_to_name(err));
+    router_close();
+  }
+}
+
+/* Opens or closes the lab network to follow the uplink. Runs on the esp_timer task, like ap_enable()
+ * and ap_disable(), so soft-AP mode changes never race each other. */
+static void router_sync(void)
+{
+  if (s_online && !s_ap_active)
+  {
+    if (!s_router_active)
+    {
+      router_open();
+    }
+  }
+  else
+  {
+    router_close();
+  }
+}
+
+static void router_timer_cb(void *arg)
+{
+  (void)arg;
+  router_sync();
+}
+
+/* Called from event handlers: the work happens on the esp_timer task. */
+static void router_request_sync(void)
+{
+  esp_timer_stop(s_router_timer);
+  esp_timer_start_once(s_router_timer, 0);
+}
+
+#else
+
+static void router_services_start(void) {}
+static void router_close(void) {}
+static void router_sync(void) {}
+static void router_request_sync(void) {}
+
+#endif /* CONFIG_WIFI_BRIDGE_ROUTER_MODE */
+
 static esp_err_t ap_enable(void)
 {
   if (s_ap_active)
     return ESP_OK;
 
+  router_close(); /* one soft AP: the setup network replaces the lab network */
   ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "enable AP+STA mode");
   ESP_RETURN_ON_ERROR(ap_configure(), TAG, "configure setup network");
 
@@ -386,6 +561,7 @@ static void ap_stop_timer_cb(void *arg)
   if (s_online)
   {
     ap_disable();
+    router_sync(); /* router lab mode: the lab network takes the soft AP over */
   }
 }
 
@@ -427,6 +603,7 @@ static void on_sta_disconnected(const wifi_event_sta_disconnected_t *event)
   bool has_saved = s_has_saved;
   publish_state_locked();
   unlock();
+  router_request_sync(); /* no uplink: close the lab network */
 
   if (!has_saved)
     return;
@@ -459,7 +636,14 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
       on_sta_disconnected(data);
       break;
     case WIFI_EVENT_AP_START:
-      ap_services_start();
+      if (s_router_active)
+      {
+        router_services_start();
+      }
+      else
+      {
+        ap_services_start();
+      }
       break;
     case WIFI_EVENT_AP_STOP:
       dns_catch_all_stop();
@@ -512,6 +696,10 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
       esp_timer_stop(s_ap_stop_timer);
       esp_timer_start_once(s_ap_stop_timer, AP_LINGER_US);
     }
+    else
+    {
+      router_request_sync(); /* with the setup network open, ap_stop_timer_cb does it */
+    }
   }
   else if (id == IP_EVENT_STA_LOST_IP)
   {
@@ -521,6 +709,7 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     s_sta_failed = true;
     publish_state_locked();
     unlock();
+    router_request_sync();
   }
 }
 
@@ -541,6 +730,9 @@ esp_err_t wifi_bridge_start(const wifi_bridge_config_t *cfg)
   s_sta_netif = esp_netif_create_default_wifi_sta();
   s_ap_netif = esp_netif_create_default_wifi_ap();
   ESP_RETURN_ON_FALSE(s_sta_netif && s_ap_netif, ESP_FAIL, TAG, "create Wi-Fi network interfaces");
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+  ESP_RETURN_ON_ERROR(router_set_ap_address(), TAG, "set the lab network address");
+#endif
 
   wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_RETURN_ON_ERROR(esp_wifi_init(&init_cfg), TAG, "esp_wifi_init");
@@ -558,6 +750,9 @@ esp_err_t wifi_bridge_start(const wifi_bridge_config_t *cfg)
     {&s_ap_stop_timer, ap_stop_timer_cb, "wifi_ap_stop"},
     {&s_prov_timer, prov_timer_cb, "wifi_prov"},
     {&s_restart_timer, restart_timer_cb, "wifi_restart"},
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+    {&s_router_timer, router_timer_cb, "wifi_router"},
+#endif
   };
   for (size_t i = 0; i < sizeof(timers) / sizeof(timers[0]); i++)
   {
@@ -800,3 +995,64 @@ esp_err_t wifi_bridge_forget_and_restart(uint32_t delay_ms)
   ESP_LOGW(TAG, "Saved network erased, restarting in %u ms", (unsigned)delay_ms);
   return esp_timer_start_once(s_restart_timer, (uint64_t)delay_ms * 1000);
 }
+
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+
+esp_err_t wifi_bridge_router_get_status(wifi_bridge_router_status_t *out)
+{
+  ESP_RETURN_ON_FALSE(out, ESP_ERR_INVALID_ARG, TAG, "out is NULL");
+  memset(out, 0, sizeof(*out));
+
+  lock();
+  out->active = s_router_active;
+  if (s_online && !s_router_active)
+  {
+    strlcpy(out->problem, s_router_problem, sizeof(out->problem));
+  }
+  unlock();
+  strlcpy(out->ssid, CONFIG_WIFI_BRIDGE_ROUTER_SSID, sizeof(out->ssid));
+  out->max_clients = CONFIG_WIFI_BRIDGE_ROUTER_MAX_CLIENTS;
+
+  esp_netif_ip_info_t ap;
+  if (esp_netif_get_ip_info(s_ap_netif, &ap) == ESP_OK)
+  {
+    snprintf(out->ip, sizeof(out->ip), IPSTR, IP2STR(&ap.ip));
+  }
+
+  wifi_ap_record_t uplink;
+  wifi_sta_list_t list;
+  if (out->active && esp_wifi_sta_get_ap_info(&uplink) == ESP_OK)
+  {
+    out->channel = uplink.primary;
+  }
+  if (out->active && esp_wifi_ap_get_sta_list(&list) == ESP_OK)
+  {
+    out->clients = (uint8_t)list.num;
+  }
+  traffic_observer_get_totals(out);
+  return ESP_OK;
+}
+
+size_t wifi_bridge_router_get_clients(wifi_bridge_router_client_t *out, size_t max)
+{
+  wifi_sta_list_t list;
+  wifi_sta_mac_ip_list_t leases; /* same order as `list` */
+  if (!out || !s_router_active || esp_wifi_ap_get_sta_list(&list) != ESP_OK ||
+      esp_wifi_ap_get_sta_list_with_ip(&list, &leases) != ESP_OK)
+    return 0;
+
+  size_t n = 0;
+  for (int i = 0; i < list.num && n < max; i++, n++)
+  {
+    snprintf(out[n].mac, sizeof(out[n].mac), MACSTR, MAC2STR(list.sta[i].mac));
+    out[n].ip[0] = '\0';
+    if (leases.sta[i].ip.addr != 0)
+    {
+      snprintf(out[n].ip, sizeof(out[n].ip), IPSTR, IP2STR(&leases.sta[i].ip));
+    }
+    out[n].rssi = list.sta[i].rssi;
+  }
+  return n;
+}
+
+#endif /* CONFIG_WIFI_BRIDGE_ROUTER_MODE */

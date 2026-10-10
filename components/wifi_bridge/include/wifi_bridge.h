@@ -138,6 +138,71 @@ extern "C"
    */
   esp_err_t wifi_bridge_forget_and_restart(uint32_t delay_ms);
 
+  /*
+   * Router lab mode (CONFIG_WIFI_BRIDGE_ROUTER_MODE; the functions below only exist with it).
+   *
+   * While online, a separate WPA2 "lab network" routes its clients to the saved network through
+   * IPv4 NAT. With capture on, every flow a lab client opens through the NAT (client, destination
+   * address, port, protocol, counts) and the DNS names it asks are kept in RAM, in bounded tables.
+   * No payload is ever stored. When the uplink goes, the lab network closes, and the usual retry and
+   * setup network take over.
+   */
+
+  typedef struct
+  {
+    bool active; /**< lab network open and routing */
+    char ssid[33];
+    char ip[16];      /**< the device on the lab network */
+    uint8_t channel;  /**< always the uplink's: there is one radio */
+    uint8_t clients;  /**< devices joined */
+    uint8_t max_clients;
+    char problem[80]; /**< why the lab network did not open although online, or "" */
+    bool capture;
+    uint32_t packets; /**< sent by lab clients through the NAT, since boot or the last clear */
+    uint64_t bytes;
+    uint32_t flows_dropped; /**< pushed out of the full flow table */
+    uint16_t flows_max;     /**< flow table slots */
+    uint16_t dns_max;       /**< DNS names kept */
+  } wifi_bridge_router_status_t;
+
+  typedef struct
+  {
+    char mac[18];
+    char ip[16]; /**< "" until it has a DHCP lease */
+    int8_t rssi;
+  } wifi_bridge_router_client_t;
+
+  typedef struct
+  {
+    char client[16];
+    char dst[16];
+    uint16_t port; /**< destination port, 0 for ICMP */
+    uint8_t proto; /**< IP protocol: 1 ICMP, 6 TCP, 17 UDP */
+    uint32_t packets;
+    uint64_t bytes; /**< client to destination only */
+    uint32_t first_s; /**< seconds since boot */
+    uint32_t last_s;
+  } wifi_bridge_router_flow_t;
+
+  typedef struct
+  {
+    char client[16];
+    char name[64]; /**< longer names are cut */
+    uint32_t at_s; /**< seconds since boot */
+  } wifi_bridge_router_dns_t;
+
+  esp_err_t wifi_bridge_router_get_status(wifi_bridge_router_status_t *out);
+  /** @return number of entries written: the devices on the lab network. */
+  size_t wifi_bridge_router_get_clients(wifi_bridge_router_client_t *out, size_t max);
+  /** @brief The flow in table slot @p slot (0 to flows_max - 1). @return false for an empty slot. */
+  bool wifi_bridge_router_get_flow(size_t slot, wifi_bridge_router_flow_t *out);
+  /** @brief The @p age-th most recent DNS name (0 = newest, up to dns_max - 1). @return false if none. */
+  bool wifi_bridge_router_get_dns(size_t age, wifi_bridge_router_dns_t *out);
+  /** @brief Start or stop recording flows and DNS names. Takes effect on the next packet. */
+  void wifi_bridge_router_set_capture(bool on);
+  /** @brief Forget every flow and DNS name and zero the counters. */
+  void wifi_bridge_router_clear(void);
+
 #ifdef __cplusplus
 }
 #endif

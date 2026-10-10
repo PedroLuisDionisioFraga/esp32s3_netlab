@@ -32,4 +32,71 @@ menu "Wi-Fi bridge"
             If the saved network is not found at all (not in range), it is forgotten and the
             device restarts straight into setup mode instead.
 
+    menuconfig WIFI_BRIDGE_ROUTER_MODE
+        bool "Router lab mode (for an authorized classroom lab)"
+        default n
+        select LWIP_IP_FORWARD
+        select LWIP_IPV4_NAPT
+        help
+            Once the device is online it opens a second, separate Wi-Fi network (the "lab
+            network"), hands out addresses by DHCP and routes its clients to the saved network
+            through IPv4 NAT. The dashboard shows the lab clients and, only while capture is on,
+            which addresses and DNS names they reach. Payloads are never stored.
+            Only use it on networks and with devices you are allowed to observe.
+
+    if WIFI_BRIDGE_ROUTER_MODE
+
+    config WIFI_BRIDGE_ROUTER_SSID
+        string "Lab network name"
+        default "Netlab-Lab"
+        help
+            1 to 32 characters. Must not be the name of the saved network or of any other real
+            network: the lab network never pretends to be another one, and it refuses to open
+            under the saved network's name.
+
+    config WIFI_BRIDGE_ROUTER_PASSWORD
+        string "Lab network password"
+        default "netlablab"
+        help
+            WPA2 password, 8 to 63 characters. The lab network is never open.
+
+    config WIFI_BRIDGE_ROUTER_IP
+        string "Lab network address"
+        default "192.168.4.1"
+        help
+            Address of the device on the lab network (and the setup network), a /24. Clients get
+            addresses from the same /24 by DHCP. Change it when the saved network already uses
+            this /24, for example 192.168.42.1: the lab network does not open while the two clash.
+
+    config WIFI_BRIDGE_ROUTER_MAX_CLIENTS
+        int "Maximum devices on the lab network"
+        range 1 8
+        default 4
+        help
+            Every client shares the radio with the uplink: a few devices keep it usable.
+
+    config WIFI_BRIDGE_ROUTER_CAPTURE_DEFAULT
+        bool "Capture on at boot"
+        default n
+        help
+            Capture records flows and DNS names of lab clients. Off by default: turn it on from
+            the dashboard when the class has agreed to it.
+
+    config WIFI_BRIDGE_ROUTER_FLOWS_MAX
+        int "Flows kept"
+        range 8 256
+        default 64
+        help
+            Client, destination address, port and protocol, with packet and byte counts. When
+            full, the flow seen least recently is dropped. Kept in RAM only.
+
+    config WIFI_BRIDGE_ROUTER_DNS_MAX
+        int "DNS names kept"
+        range 4 64
+        default 16
+        help
+            The most recent DNS names asked by lab clients (a ring). Kept in RAM only.
+
+    endif
+
 endmenu
