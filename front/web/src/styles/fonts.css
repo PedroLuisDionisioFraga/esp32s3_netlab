@@ -1,0 +1,19 @@
+/* Inter and JetBrains Mono (SIL Open Font License 1.1, via @fontsource-variable). Latin only: the UI is in English,
+ * and the other subsets would each add a file to the flash. The relative path reaches into node_modules on purpose:
+ * Vite copies the file to dist/assets with a hashed name. */
+@font-face {
+  font-family: 'Inter Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url('../../node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2') format('woff2-variations');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2')
+    format('woff2-variations');
+}

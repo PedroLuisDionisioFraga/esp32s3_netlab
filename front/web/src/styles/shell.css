@@ -1,0 +1,455 @@
+/* App shell: sidebar, header, drawer, popover, toast, dialogs, and the login page. */
+
+.nl-shell {
+  display: grid;
+  grid-template-columns: var(--nl-sidebar-w) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+  transition: grid-template-columns var(--nl-t) var(--nl-ease);
+}
+
+.nl-shell.is-rail {
+  grid-template-columns: var(--nl-rail-w) minmax(0, 1fr);
+}
+
+/* ---------- Sidebar ---------- */
+.nl-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sidebar);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  height: 100vh;
+  height: 100dvh;
+  padding: 14px 12px;
+  overflow: hidden auto;
+  background: var(--nl-sidebar-bg);
+  color: var(--nl-sidebar-text);
+}
+
+:root[data-theme='dark'] .nl-sidebar {
+  border-right: 1px solid var(--nl-border-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .nl-sidebar {
+    border-right: 1px solid var(--nl-border-soft);
+  }
+}
+
+.nl-sidebar :focus-visible {
+  outline-color: var(--nl-sidebar-accent);
+}
+
+.nl-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 16px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+}
+
+.nl-brand-mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.nl-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-nav-link,
+.nl-side-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--nl-radius);
+  background: transparent;
+  color: var(--nl-sidebar-text);
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--nl-t-fast) var(--nl-ease);
+}
+
+.nl-nav-link:hover,
+.nl-side-btn:hover {
+  background-color: var(--nl-sidebar-hover);
+}
+
+.nl-nav-link[aria-current='page'] {
+  background-color: var(--nl-sidebar-active-bg);
+  color: var(--nl-sidebar-active-text);
+  font-weight: 600;
+}
+
+/* The current page is marked by a bar as well as by the fill: the fill alone is a subtle change of colour. */
+.nl-nav-link[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background-color: var(--nl-sidebar-accent);
+}
+
+.nl-sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nl-shell.is-rail .nl-side-label {
+  display: none;
+}
+
+.nl-shell.is-rail .nl-nav-link,
+.nl-shell.is-rail .nl-side-btn {
+  justify-content: center;
+  padding: 0;
+}
+
+.nl-shell.is-rail .nl-brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+.nl-shell.is-rail .nl-brand-name {
+  display: none;
+}
+
+/* ---------- Header and main ---------- */
+.nl-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.nl-header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--nl-header-h);
+  padding: 8px var(--nl-main-pad);
+  border-bottom: 1px solid var(--nl-border-soft);
+  background-color: var(--nl-bg);
+}
+
+.nl-header-title {
+  margin-right: auto;
+  color: var(--nl-text-strong);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.nl-main {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: var(--nl-main-pad);
+}
+
+/* The page takes the focus after a navigation so a screen reader starts at its top; it is not a control. */
+.nl-main:focus {
+  outline: none;
+}
+
+.nl-menu-btn {
+  display: none;
+}
+
+.nl-scrim {
+  display: none;
+}
+
+@media (max-width: 1023.98px) {
+  .nl-shell,
+  .nl-shell.is-rail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The sidebar becomes an off-canvas dialog; the rail makes no sense there. */
+  .nl-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(var(--nl-sidebar-w), 85vw);
+    transform: translateX(-102%);
+    transition: transform var(--nl-t) var(--nl-ease);
+  }
+
+  .nl-sidebar.is-open {
+    transform: none;
+    box-shadow: var(--nl-shadow-pop);
+  }
+
+  .nl-shell.is-rail .nl-side-label,
+  .nl-shell.is-rail .nl-brand-name {
+    display: inline;
+  }
+
+  .nl-shell.is-rail .nl-nav-link,
+  .nl-shell.is-rail .nl-side-btn {
+    justify-content: flex-start;
+    padding: 0 12px;
+  }
+
+  .nl-menu-btn {
+    display: inline-flex;
+  }
+
+  .nl-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-sidebar) - 1);
+    display: block;
+    background-color: var(--nl-backdrop);
+  }
+
+  .nl-rail-btn {
+    display: none !important;
+  }
+
+  .nl-main {
+    padding: 20px 16px 32px;
+  }
+
+  .nl-header {
+    padding-inline: 16px;
+  }
+}
+
+/* ---------- Settings popover ---------- */
+.nl-pop-wrap {
+  position: relative;
+}
+
+.nl-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: var(--z-pop);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 260px;
+  padding: 14px;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius-card);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-pop);
+}
+
+.nl-pop h2 {
+  font-size: 13px;
+}
+
+.nl-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  color: var(--nl-text-strong);
+  cursor: pointer;
+}
+
+.nl-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--nl-primary);
+}
+
+/* ---------- Toast ---------- */
+.nl-toast-host {
+  position: fixed;
+  right: 0;
+  bottom: 20px;
+  left: 0;
+  z-index: var(--z-toast);
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+}
+
+.nl-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 520px;
+  padding: 10px 12px 10px 14px;
+  border-radius: var(--nl-radius);
+  background-color: var(--nl-toast-bg);
+  box-shadow: var(--nl-shadow-pop);
+  color: var(--nl-toast-text);
+  pointer-events: auto;
+}
+
+.nl-toast .nl-icon-btn {
+  color: var(--nl-toast-text);
+}
+
+.nl-toast .nl-icon-btn:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: var(--nl-toast-text);
+}
+
+.nl-toast-success .nl-icon:first-child {
+  color: #6ee7a0;
+}
+
+.nl-toast-error .nl-icon:first-child {
+  color: #ff8a80;
+}
+
+.nl-toast-info .nl-icon:first-child {
+  color: #7cc4ee;
+}
+
+.nl-toast-enter-active,
+.nl-toast-leave-active,
+.nl-fade-enter-active,
+.nl-fade-leave-active {
+  transition: opacity var(--nl-t) var(--nl-ease);
+}
+
+.nl-toast-enter-from,
+.nl-toast-leave-to,
+.nl-fade-enter-from,
+.nl-fade-leave-to {
+  opacity: 0;
+}
+
+/* ---------- Dialogs ---------- */
+.nl-dialog-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: flex;
+  align-items: safe center;
+  justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.nl-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: var(--nl-backdrop);
+}
+
+.nl-dialog {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(440px, 100%);
+  padding: 22px;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius-card);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-pop);
+  outline: none;
+}
+
+.nl-dialog.is-wide {
+  width: min(780px, 100%);
+}
+
+.nl-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nl-dialog h2 {
+  font-size: 18px;
+}
+
+.nl-dialog-sub {
+  margin-top: 2px;
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- Login ---------- */
+.nl-login {
+  display: flex;
+  align-items: safe center;
+  justify-content: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px 16px;
+}
+
+.nl-login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: min(100%, 400px);
+  padding: 28px 28px 24px;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius-card);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-card);
+}
+
+.nl-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nl-login-brand .nl-brand-mark {
+  width: 40px;
+  height: 40px;
+}
+
+.nl-login-brand h1 {
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.nl-login-meta {
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
