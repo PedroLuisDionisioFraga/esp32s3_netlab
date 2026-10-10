@@ -1,0 +1,42 @@
+menu "Netlab web access"
+
+    config NETLAB_AUTH_ENABLE
+        bool "Require a login for the web UI and the API"
+        default y
+        help
+            The web page asks for a user name and password and every API route needs the
+            session token it gets back ("Authorization: Bearer <token>"). The login page, the
+            static files, GET /api/v1/about and, while the Wi-Fi setup network is open, the three
+            Wi-Fi provisioning routes stay public: a phone joining the setup network has to be able
+            to reach them. In router lab mode, POST /api/v1/router/lab (the lab service students'
+            devices call) is public too; it records only while the capture is on.
+
+            Turn it off to go back to an open API (anyone on the network can use it).
+
+    config NETLAB_ADMIN_USER
+        string "Administrator user name"
+        default "admin"
+        depends on NETLAB_AUTH_ENABLE
+
+    config NETLAB_ADMIN_PASSWORD
+        string "Administrator password (LAB ONLY, plain text)"
+        default "admin"
+        depends on NETLAB_AUTH_ENABLE
+        help
+            LAB ONLY. This value is compiled into the firmware and written in clear text to
+            sdkconfig, and this repository is public, so the default is known to everyone. The web
+            UI is plain HTTP, so the browser also sends it in clear over the network at each login.
+            That is acceptable on a home network you control; do not expose the device to the
+            internet. Set your own value in menuconfig: it lands in sdkconfig, which git ignores.
+
+    config NETLAB_SESSION_TTL_MIN
+        int "Session lifetime without use (minutes)"
+        default 30
+        range 1 1440
+        depends on NETLAB_AUTH_ENABLE
+        help
+            Each request extends the session, so it only ends after this long without any.
+            Up to four sessions live at once (a phone and a PC); a fifth login replaces the one
+            that would expire first.
+
+endmenu

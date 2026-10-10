@@ -1,0 +1,485 @@
+/* The Memory page: tiles that open a detail, the history chart, regions, health, tasks and their filters. */
+
+/* ---------- A KPI tile that opens its detail ----------
+ * The tile stays a <div>; a transparent button covers it. Hover and focus draw an inset ring inside the card. */
+.nl-tile {
+  position: relative;
+  display: flex;
+}
+
+.nl-tile > .nl-kpi {
+  flex: 1;
+  min-width: 0;
+}
+
+.nl-tile-hit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--nl-radius-card);
+  background: transparent;
+  color: var(--nl-muted);
+  cursor: pointer;
+  transition:
+    box-shadow var(--nl-t-fast) var(--nl-ease),
+    color var(--nl-t-fast) var(--nl-ease);
+}
+
+.nl-tile-hit:hover,
+.nl-tile-hit:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--nl-primary);
+  color: var(--nl-text-strong);
+}
+
+/* ---------- Regions and health ---------- */
+.nl-region + .nl-region {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--nl-border-soft);
+}
+
+.nl-region-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.nl-region-head h3 {
+  font-size: 14px;
+}
+
+/* Determinate bar. The number is in aria-valuenow, so the colour is never the only channel. */
+.nl-bar {
+  height: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: var(--nl-border-soft);
+}
+
+.nl-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--nl-primary);
+}
+
+.nl-bar.is-alert > span {
+  background-color: var(--nl-error);
+}
+
+.nl-checks {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-check-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--nl-border-soft);
+}
+
+.nl-check-row:first-child {
+  padding-top: 0;
+}
+
+.nl-check-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.nl-check-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nl-check-name {
+  color: var(--nl-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nl-limit-text {
+  color: var(--nl-muted);
+  font-size: 12px;
+}
+
+/* ---------- The history chart ----------
+ * 2px lines, a 10% wash, hairline solid grid, a 2px surface ring on markers. Text wears text tokens, never the
+ * series colour: identity comes from the line key beside it. */
+.nl-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nl-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  color: var(--nl-text);
+  font-size: 12.5px;
+  list-style: none;
+}
+
+.nl-chart-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nl-key {
+  display: inline-block;
+  flex: none;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.nl-chart-frame {
+  position: relative;
+  border-radius: var(--nl-radius);
+  touch-action: pan-y;
+}
+
+.nl-chart-frame svg {
+  display: block;
+  max-width: 100%;
+}
+
+.nl-chart-grid line {
+  stroke: var(--nl-border-soft);
+  stroke-width: 1;
+}
+
+.nl-chart-axis {
+  stroke: var(--nl-border);
+  stroke-width: 1;
+}
+
+.nl-chart-ticks text {
+  fill: var(--nl-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nl-chart-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nl-chart-area {
+  stroke: none;
+  opacity: 0.1;
+}
+
+/* The ring is the stroke painted under the fill: a 4px stroke leaves 2px of surface colour outside the dot. */
+.nl-chart-end,
+.nl-chart-extreme circle {
+  stroke: var(--nl-surface);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+
+.nl-chart-extreme text {
+  fill: var(--nl-text);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.nl-chart-end-label {
+  fill: var(--nl-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one dashed line: a threshold, as opposed to the solid grid. */
+.nl-chart-limit {
+  stroke: var(--nl-limit);
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.nl-chart-limit-label {
+  fill: var(--nl-text);
+  font-size: 11.5px;
+}
+
+.nl-chart-cursor {
+  stroke: var(--nl-muted);
+  stroke-width: 1;
+}
+
+.nl-chart-tip {
+  position: absolute;
+  top: 6px;
+  z-index: 2;
+  min-width: 150px;
+  padding: 8px 10px;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-pop);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+
+.nl-chart-tip p {
+  margin: 0;
+}
+
+.nl-chart-tip-when {
+  margin-bottom: 4px !important;
+  color: var(--nl-muted);
+  font-size: 11.5px;
+}
+
+.nl-chart-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The value leads and the series name follows: here the reader already has the series and wants the number. */
+.nl-chart-tip-row strong {
+  color: var(--nl-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.nl-chart-tip-row span:last-child {
+  color: var(--nl-text);
+}
+
+/* ---------- The tile modal ---------- */
+.nl-metric-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.nl-metric-window {
+  margin-left: auto;
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-metric-plot .nl-table-wrap {
+  max-height: 300px;
+  overflow: auto;
+}
+
+.nl-metric-text {
+  color: var(--nl-text);
+}
+
+.nl-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.nl-stat {
+  padding: 10px 12px;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius);
+  background-color: var(--nl-surface-2);
+}
+
+.nl-stat dt {
+  color: var(--nl-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nl-stat dd {
+  margin: 2px 0 0;
+  color: var(--nl-text-strong);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.nl-metric-trend {
+  color: var(--nl-text-strong);
+  font-weight: 500;
+}
+
+.nl-metric-extra h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.nl-metric-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--nl-border-soft);
+}
+
+/* ---------- A region as a bar of used / scattered / largest block ---------- */
+.nl-map-bar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  margin-bottom: 12px;
+}
+
+.nl-map-seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.nl-map-seg:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.nl-map-seg:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.nl-map-seg:only-child {
+  border-radius: 4px;
+}
+
+.nl-map-legend {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+  list-style: none;
+}
+
+.nl-map-legend li {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.nl-map-legend .nl-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+
+.nl-map-label {
+  color: var(--nl-text);
+}
+
+.nl-map-pct {
+  min-width: 56px;
+  color: var(--nl-muted);
+  text-align: right;
+}
+
+/* ---------- The tasks that used the CPU ---------- */
+.nl-top {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-top li {
+  display: grid;
+  grid-template-columns: minmax(80px, 160px) 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.nl-top-name {
+  overflow: hidden;
+  color: var(--nl-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nl-top-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background-color: var(--nl-border-soft);
+}
+
+.nl-top-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--nl-series-1);
+}
+
+/* ---------- Filters above the task table ---------- */
+.nl-tasks-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--nl-border-soft);
+}
+
+.nl-search {
+  flex: 1 1 200px;
+  max-width: 280px;
+}
+
+.nl-tasks-chips {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.nl-tasks-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-core-select {
+  width: auto;
+  min-width: 150px;
+  height: 30px;
+}
+
+@media (max-width: 639.98px) {
+  .nl-core-select {
+    height: 44px;
+  }
+
+  .nl-search {
+    max-width: none;
+  }
+}

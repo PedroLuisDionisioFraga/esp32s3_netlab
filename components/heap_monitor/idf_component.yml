@@ -1,4 +1,5 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  # Exact version: heap_monitor.c uses heaptop's private headers (src/), which can change in any release.
-  pedroluisdionisiofraga/heaptop: "==0.3.0"
+  # 0.4.0 adds the public JSON export (heaptop_json_snapshot) this component streams. A caret on 0.x stops below
+  # the next minor, so ^0.3.x would not accept it.
+  pedroluisdionisiofraga/heaptop: "^0.4.0"

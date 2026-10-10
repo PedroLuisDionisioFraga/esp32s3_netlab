@@ -17,7 +17,7 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # Browsers send request headers larger than the 512-byte default (would answer HTTP 431)
 CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
 
-# Heap monitor (/heaptop, heaptop component): the data sources it reads.
+# Heap monitor (the Memory page, heaptop component): the data sources it reads.
 # Per-task CPU % (64-bit esp_timer counters) and the core column.
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

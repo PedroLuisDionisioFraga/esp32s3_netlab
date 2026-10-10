@@ -9,8 +9,10 @@
 #include <strings.h>
 #include <unistd.h>
 
+#include "auth.h"
 #include "cJSON.h"
 #include "chip_health.h"
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
@@ -28,9 +30,9 @@
 #define BODY_RECV_RETRIES 3
 #define SCAN_RESULTS_MAX  20
 #define RESTART_DELAY_MS  500
-#define QUERY_MAX         96
-#define QUERY_VALUE_MAX   16
-#define QUERY_ERROR_MAX   96
+#define AUTH_HEADER_MAX   80 /* "Bearer " + a 32-character token, with room to spare */
+#define CREDENTIAL_MAX    64
+#define ENCODING_MAX      64
 
 #if CONFIG_WIFI_BRIDGE_ROUTER_MODE
 #define ROUTER_CLIENTS_MAX 8 /* CONFIG_WIFI_BRIDGE_ROUTER_MAX_CLIENTS is at most 8 */
@@ -57,8 +59,7 @@ typedef struct
 {
   char base_path[BASE_PATH_MAX];
   char hostname[HOSTNAME_MAX];
-  char scratch[SCRATCH_BUFSIZE];            /* shared by all handlers: esp_http_server runs them on one task */
-  char heaptop_text[HEAP_MONITOR_TEXT_MAX]; /* one heaptop frame */
+  char scratch[SCRATCH_BUFSIZE]; /* shared by all handlers: esp_http_server runs them on one task */
 #if CONFIG_WIFI_BRIDGE_ROUTER_MODE
   lab_message_t lab[LAB_MESSAGES_MAX]; /* a ring, cleared with the capture */
   size_t lab_next;
@@ -87,6 +88,42 @@ static esp_err_t send_error(httpd_req_t *req, const char *status, const char *me
   httpd_resp_set_status(req, status);
   httpd_resp_set_type(req, "text/plain");
   return httpd_resp_sendstr(req, message);
+}
+
+/* ---------- authentication ---------- */
+
+/* The "Authorization: Bearer <token>" header: the token of the session the web page got at login. A cookie would
+ * be sent by the browser to any site that asked for it; a header the page sets itself cannot be forged across sites. */
+static bool bearer_token(httpd_req_t *req, char *token, size_t len)
+{
+  char header[AUTH_HEADER_MAX];
+  if (httpd_req_get_hdr_value_str(req, "Authorization", header, sizeof(header)) != ESP_OK)
+    return false;
+  if (strncasecmp(header, "Bearer ", 7) != 0)
+    return false;
+  strlcpy(token, header + 7, len);
+  return true;
+}
+
+/* True when the request may go on. Otherwise the 401 has been sent and the handler must just return. */
+static bool require_session(httpd_req_t *req)
+{
+  if (!rest_auth_enabled())
+    return true;
+
+  char token[REST_AUTH_TOKEN_LEN + 1];
+  if (bearer_token(req, token, sizeof(token)) && rest_auth_check(token))
+    return true;
+
+  send_error(req, "401 Unauthorized", "Sign in required");
+  return false;
+}
+
+/* The Wi-Fi provisioning routes are what a phone on the setup network uses before it has any login to show: they
+ * are open while that network is, and need a session otherwise. */
+static bool require_session_unless_setup(httpd_req_t *req)
+{
+  return wifi_bridge_setup_ap_active() || require_session(req);
 }
 
 /* Reads the whole body into ctx->scratch, NUL-terminated. Returns false after sending the error
@@ -169,6 +206,9 @@ static const char *prov_state_name(wifi_bridge_prov_state_t state)
 
 static esp_err_t system_info_get_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   chip_health_snapshot_t health;
   chip_health_read(&health);
 
@@ -192,8 +232,12 @@ static esp_err_t system_info_get_handler(httpd_req_t *req)
   return send_json(req, root);
 }
 
+/* The setup page reads this too, to show the address the lab got: open while the setup network is. */
 static esp_err_t link_get_handler(httpd_req_t *req)
 {
+  if (!require_session_unless_setup(req))
+    return ESP_OK;
+
   wifi_bridge_link_t link;
   wifi_bridge_get_link(&link);
 
@@ -222,6 +266,9 @@ static esp_err_t link_get_handler(httpd_req_t *req)
 /* Body: {"r":0-255,"g":0-255,"b":0-255} forces a color, {"mode":"auto"} returns to the status color. */
 static esp_err_t led_post_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   cJSON *body = recv_json_body(req);
   if (!body)
     return ESP_OK; /* error response already sent */
@@ -260,6 +307,9 @@ static esp_err_t led_post_handler(httpd_req_t *req)
 
 static esp_err_t wifi_status_get_handler(httpd_req_t *req)
 {
+  if (!require_session_unless_setup(req))
+    return ESP_OK;
+
   rest_ctx_t *ctx = req->user_ctx;
   wifi_bridge_status_t st;
   wifi_bridge_get_status(&st);
@@ -302,6 +352,9 @@ static esp_err_t wifi_status_get_handler(httpd_req_t *req)
 /* Blocks for a few seconds while the radio scans. */
 static esp_err_t wifi_scan_get_handler(httpd_req_t *req)
 {
+  if (!require_session_unless_setup(req))
+    return ESP_OK;
+
   wifi_bridge_ap_t *networks = calloc(SCAN_RESULTS_MAX, sizeof(*networks));
   if (!networks)
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -342,6 +395,9 @@ static esp_err_t wifi_scan_get_handler(httpd_req_t *req)
 /* Body: {"ssid":"...","password":"..."}. Answers 202 at once; poll /wifi/status for the result. */
 static esp_err_t wifi_provision_post_handler(httpd_req_t *req)
 {
+  if (!require_session_unless_setup(req))
+    return ESP_OK;
+
   cJSON *body = recv_json_body(req);
   if (!body)
     return ESP_OK; /* error response already sent */
@@ -382,6 +438,9 @@ static esp_err_t wifi_provision_post_handler(httpd_req_t *req)
 /* Forgets the saved network and restarts into setup mode. */
 static esp_err_t wifi_forget_post_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   if (wifi_bridge_forget_and_restart(RESTART_DELAY_MS) != ESP_OK)
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not erase the saved network");
 
@@ -393,166 +452,133 @@ static esp_err_t wifi_forget_post_handler(httpd_req_t *req)
   return send_json(req, root);
 }
 
-/* ---------- heaptop ---------- */
+/* ---------- session ---------- */
 
-static const struct
+/* Body: {"username":"...","password":"..."}. Answers {"token":"...","expires_in":seconds}: the page sends the token
+ * back as "Authorization: Bearer <token>". Public, like the page that calls it. */
+static esp_err_t session_post_handler(httpd_req_t *req)
 {
-  const char *name;
-  heap_monitor_view_t view;
-} k_heaptop_views[] = {
-  {"top", HEAP_MONITOR_VIEW_TOP},
-  {"heap", HEAP_MONITOR_VIEW_HEAP},
-  {"tasks", HEAP_MONITOR_VIEW_TASKS},
-  {"health", HEAP_MONITOR_VIEW_HEALTH},
-};
+  cJSON *body = recv_json_body(req);
+  if (!body)
+    return ESP_OK; /* error response already sent */
 
-static const struct
-{
-  const char *name;
-  heap_monitor_sort_t sort;
-} k_heaptop_sorts[] = {
-  {"cpu", HEAP_MONITOR_SORT_CPU},
-  {"heap", HEAP_MONITOR_SORT_HEAP},
-  {"stack", HEAP_MONITOR_SORT_STACK},
-  {"name", HEAP_MONITOR_SORT_NAME},
-};
+  const cJSON *user = cJSON_GetObjectItemCaseSensitive(body, "username");
+  const cJSON *password = cJSON_GetObjectItemCaseSensitive(body, "password");
+  char user_str[CREDENTIAL_MAX] = "";
+  char password_str[CREDENTIAL_MAX] = "";
+  const bool shaped = cJSON_IsString(user) && cJSON_IsString(password);
+  if (shaped)
+  {
+    strlcpy(user_str, user->valuestring, sizeof(user_str));
+    strlcpy(password_str, password->valuestring, sizeof(password_str));
+  }
+  cJSON_Delete(body);
+  if (!shaped)
+    return send_error(req, "400 Bad Request", "Expected {\"username\": \"...\", \"password\": \"...\"}");
 
-static const char *const k_heaptop_keys[] = {"view", "sort", "refresh", "paused"};
+  char token[REST_AUTH_TOKEN_LEN + 1];
+  uint32_t retry_after_s = 0;
+  const rest_auth_result_t result = rest_auth_login(user_str, password_str, token, &retry_after_s);
+  memset(password_str, 0, sizeof(password_str));
 
-/* True when `key` is in the query and its value fits in `value`. */
-static bool query_value(const char *query, const char *key, char *value, size_t len)
-{
-  return httpd_query_key_value(query, key, value, len) == ESP_OK;
+  if (result == REST_AUTH_LOCKED)
+  {
+    char message[64];
+    snprintf(message, sizeof(message), "Too many attempts, try again in %lu s", (unsigned long)retry_after_s);
+    return send_error(req, "429 Too Many Requests", message);
+  }
+  if (result != REST_AUTH_OK)
+    return send_error(req, "401 Unauthorized", "Wrong user name or password");
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddStringToObject(root, "token", token);
+  cJSON_AddNumberToObject(root, "expires_in", rest_auth_ttl_s());
+  return send_json(req, root);
 }
 
-/* Fills `opts` from ?view=&sort=&refresh=&paused= (each one optional). On a bad value writes the
- * reason to `problem` and returns false. */
-static bool parse_heaptop_query(httpd_req_t *req, heap_monitor_opts_t *opts, char *problem, size_t len)
+/* Ends the session of the token in the request. Always answers ok: a token that is already gone is the goal. */
+static esp_err_t session_delete_handler(httpd_req_t *req)
 {
-  char query[QUERY_MAX];
-  char value[QUERY_VALUE_MAX] = "";
-
-  esp_err_t err = httpd_req_get_url_query_str(req, query, sizeof(query));
-  if (err == ESP_ERR_NOT_FOUND)
-    return true; /* no query string: the defaults */
-
-  if (err != ESP_OK)
-  {
-    snprintf(problem, len, "Query string too long");
-    return false;
-  }
-
-  /* A value that does not fit is not copied at all (IDF leaves `value` as it was): reject it first. */
-  for (size_t k = 0; k < sizeof(k_heaptop_keys) / sizeof(k_heaptop_keys[0]); k++)
-  {
-    if (httpd_query_key_value(query, k_heaptop_keys[k], value, sizeof(value)) == ESP_ERR_HTTPD_RESULT_TRUNC)
-    {
-      snprintf(problem, len, "heaptop: value of '%s' is too long", k_heaptop_keys[k]);
-      return false;
-    }
-  }
-
-  if (query_value(query, "view", value, sizeof(value)))
-  {
-    const size_t count = sizeof(k_heaptop_views) / sizeof(k_heaptop_views[0]);
-    size_t i = 0;
-    while (i < count && strcmp(value, k_heaptop_views[i].name) != 0) i++;
-    if (i == count)
-    {
-      snprintf(problem, len, "heaptop: unknown view '%s' (use top, heap, tasks or health)", value);
-      return false;
-    }
-    opts->view = k_heaptop_views[i].view;
-  }
-
-  if (query_value(query, "sort", value, sizeof(value)))
-  {
-    const size_t count = sizeof(k_heaptop_sorts) / sizeof(k_heaptop_sorts[0]);
-    size_t i = 0;
-    while (i < count && strcmp(value, k_heaptop_sorts[i].name) != 0) i++;
-    if (i == count)
-    {
-      snprintf(problem, len, "heaptop: unknown sort key '%s' (use cpu, heap, stack or name)", value);
-      return false;
-    }
-    opts->sort = k_heaptop_sorts[i].sort;
-  }
-
-  if (query_value(query, "refresh", value, sizeof(value)))
-  {
-    char *end = NULL;
-    unsigned long ms = strtoul(value, &end, 10);
-    if (end == value || *end != '\0' || ms < HEAP_MONITOR_REFRESH_MIN_MS || ms > HEAP_MONITOR_REFRESH_MAX_MS)
-    {
-      snprintf(problem,
-               len,
-               "heaptop: refresh must be %d..%d ms",
-               HEAP_MONITOR_REFRESH_MIN_MS,
-               HEAP_MONITOR_REFRESH_MAX_MS);
-      return false;
-    }
-    opts->refresh_ms = (uint32_t)ms;
-  }
-
-  if (query_value(query, "paused", value, sizeof(value)))
-  {
-    if (strcmp(value, "0") != 0 && strcmp(value, "1") != 0)
-    {
-      snprintf(problem, len, "heaptop: paused must be 0 or 1");
-      return false;
-    }
-    opts->paused = value[0] == '1';
-  }
-  return true;
-}
-
-/* Query: view=top|heap|tasks|health, sort=cpu|heap|stack|name, refresh=50..10000 (ms), paused=0|1.
- * Answers the text the `ht` console command prints, rendered by heaptop itself. Plain text, so no
- * JSON copy of it is made on the heap this page measures. */
-static esp_err_t heaptop_get_handler(httpd_req_t *req)
-{
-  rest_ctx_t *ctx = req->user_ctx;
-  heap_monitor_opts_t opts = {
-    .view = HEAP_MONITOR_VIEW_TOP,
-    .sort = HEAP_MONITOR_SORT_CPU,
-    .refresh_ms = HEAP_MONITOR_REFRESH_DEFAULT_MS,
-    .paused = false,
-  };
-
-  char problem[QUERY_ERROR_MAX];
-  if (!parse_heaptop_query(req, &opts, problem, sizeof(problem)))
-    return send_error(req, "400 Bad Request", problem);
-
-  esp_err_t err = heap_monitor_render(&opts, ctx->heaptop_text, sizeof(ctx->heaptop_text));
-  if (err == ESP_ERR_NOT_FOUND)
-    return send_error(req, "503 Service Unavailable", "heaptop: no sample yet, try again in a moment");
-
-  if (err != ESP_OK)
-    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
-
-  httpd_resp_set_type(req, "text/plain; charset=utf-8");
-  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-  return httpd_resp_sendstr(req, ctx->heaptop_text);
-}
-
-/* Starts a fresh measurement window, like `ht clear`. */
-static esp_err_t heaptop_clear_post_handler(httpd_req_t *req)
-{
-  esp_err_t err = heap_monitor_clear();
-  if (err == ESP_ERR_TIMEOUT)
-    return send_error(req,
-                      "504 Gateway Timeout",
-                      "heaptop was slow to clear; the clear still applies to a later sample");
-
-  if (err != ESP_OK)
-    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
+  char token[REST_AUTH_TOKEN_LEN + 1];
+  if (bearer_token(req, token, sizeof(token)))
+    rest_auth_logout(token);
 
   cJSON *root = cJSON_CreateObject();
   if (!root)
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
 
   cJSON_AddBoolToObject(root, "ok", true);
-  cJSON_AddStringToObject(root, "message", "stats cleared; stack high-water marks keep their since-boot minimum");
+  return send_json(req, root);
+}
+
+/* What the login page shows before anyone is signed in: the product, its version and its address. */
+static esp_err_t about_get_handler(httpd_req_t *req)
+{
+  rest_ctx_t *ctx = req->user_ctx;
+  const esp_app_desc_t *app = esp_app_get_description();
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddStringToObject(root, "name", app->project_name);
+  cJSON_AddStringToObject(root, "version", app->version);
+  cJSON_AddStringToObject(root, "hostname", ctx->hostname);
+  cJSON_AddBoolToObject(root, "auth", rest_auth_enabled());
+  return send_json(req, root);
+}
+
+/* ---------- memory ---------- */
+
+/* heap_monitor_write_json() sink: one chunk of the document onto the socket. False once the client is gone. */
+static bool memory_sink(const char *data, size_t len, void *ctx)
+{
+  return httpd_resp_send_chunk((httpd_req_t *)ctx, data, (ssize_t)len) == ESP_OK;
+}
+
+/* The latest heaptop sample as one JSON document, streamed in chunks so no copy of it is made on the heap this page
+ * measures. The page is front/web/src/pages/MemoryPage.vue. */
+static esp_err_t memory_get_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  const esp_err_t err = heap_monitor_write_json(memory_sink, req);
+  if (err == ESP_ERR_NOT_FOUND)
+    return send_error(req, "503 Service Unavailable", "heaptop: no sample yet, try again in a moment");
+  if (err == ESP_ERR_INVALID_STATE)
+    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
+  if (err != ESP_OK)
+    return ESP_FAIL; /* part of the document is on the wire: closing the connection is what tells the browser */
+
+  return httpd_resp_send_chunk(req, NULL, 0); /* the empty chunk ends the response */
+}
+
+/* Starts a fresh measurement window, like `ht clear`. */
+static esp_err_t memory_clear_post_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  const esp_err_t err = heap_monitor_clear();
+  if (err == ESP_ERR_INVALID_STATE)
+    return send_error(req, "503 Service Unavailable", "heaptop is not running: see the serial log at boot");
+  if (err != ESP_OK && err != ESP_ERR_TIMEOUT)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not clear the statistics");
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "ok", true);
+  /* A late cleared sample is not a failure: the clear still applies to a later one. */
+  cJSON_AddBoolToObject(root, "pending", err == ESP_ERR_TIMEOUT);
   return send_json(req, root);
 }
 
@@ -587,8 +613,8 @@ static bool peer_ipv4(httpd_req_t *req, struct in_addr *out)
   return false;
 }
 
-/* Lab clients may read the dashboard and use the lab service, but only the uplink side (the
- * instructor) turns the capture on or off and wipes it. Not authentication: see the README. */
+/* On top of the login: only the uplink side (the instructor) turns the capture on or off and wipes it, even with
+ * the admin password typed on a lab client. */
 static bool from_lab_network(httpd_req_t *req)
 {
   wifi_bridge_router_status_t st;
@@ -715,6 +741,9 @@ static cJSON *lab_json(const lab_message_t *m)
  * export. */
 static esp_err_t router_get_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   rest_ctx_t *ctx = req->user_ctx;
   wifi_bridge_router_status_t st;
   wifi_bridge_router_get_status(&st);
@@ -794,6 +823,9 @@ static esp_err_t router_get_handler(httpd_req_t *req)
 /* Body: {"enabled":true|false}. */
 static esp_err_t router_capture_post_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   if (from_lab_network(req))
     return send_error(req, "403 Forbidden", "Capture is changed from the uplink network, not from the lab network");
 
@@ -822,6 +854,9 @@ static esp_err_t router_capture_post_handler(httpd_req_t *req)
 /* Forgets the flows, DNS names, lab service requests and counters. */
 static esp_err_t router_clear_post_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   rest_ctx_t *ctx = req->user_ctx;
   if (from_lab_network(req))
     return send_error(req, "403 Forbidden", "The capture is cleared from the uplink network, not from the lab network");
@@ -880,6 +915,9 @@ static esp_err_t router_lab_post_handler(httpd_req_t *req)
 
 static esp_err_t router_get_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   cJSON *root = cJSON_CreateObject();
   if (!root)
     return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
@@ -961,9 +999,12 @@ static void set_file_headers(httpd_req_t *req, const char *filepath)
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
 }
 
-/* POST /chat with a JSON body: placeholder that echoes the message back. */
+/* POST /api/v1/chat with a JSON body: placeholder that echoes the message back. */
 static esp_err_t chat_post_handler(httpd_req_t *req)
 {
+  if (!require_session(req))
+    return ESP_OK;
+
   cJSON *msg = recv_json_body(req);
   if (!msg)
     return ESP_OK; /* the error response was already sent */
@@ -977,6 +1018,13 @@ static esp_err_t chat_post_handler(httpd_req_t *req)
   ESP_LOGI(TAG, "Chat: %s", text->valuestring);
 
   return send_json(req, msg); /* send_json frees msg */
+}
+
+/* True when the client says it can decode gzip (every browser does). */
+static bool accepts_gzip(httpd_req_t *req)
+{
+  char value[ENCODING_MAX];
+  return httpd_req_get_hdr_value_str(req, "Accept-Encoding", value, sizeof(value)) == ESP_OK && strstr(value, "gzip");
 }
 
 /* Every GET that is not an API route. */
@@ -1000,6 +1048,9 @@ static esp_err_t static_get_handler(httpd_req_t *req)
   if (path_len == 0 || strstr(req->uri, ".."))
     return httpd_resp_send_404(req);
 
+  /* An API path nobody registered is a 404, not the web page: the page would answer 200 to a typo in a fetch(). */
+  if (strncmp(req->uri, "/api/", 5) == 0)
+    return httpd_resp_send_404(req);
 
   char filepath[FILE_PATH_MAX];
   const char *index_name = (req->uri[path_len - 1] == '/') ? "index.html" : "";
@@ -1007,17 +1058,37 @@ static esp_err_t static_get_handler(httpd_req_t *req)
   if (written < 0 || written >= (int)sizeof(filepath))
     return httpd_resp_send_404(req);
 
-  int fd = open(filepath, O_RDONLY, 0);
+  /* The web UI is built with every file gzipped (front/web/vite.config.ts), so the .gz is the file that exists.
+   * The type is still that of the name without it. */
+  int fd = -1;
+  bool gzipped = false;
+  if (accepts_gzip(req))
+  {
+    char gz_path[FILE_PATH_MAX];
+    if (snprintf(gz_path, sizeof(gz_path), "%s.gz", filepath) < (int)sizeof(gz_path))
+    {
+      fd = open(gz_path, O_RDONLY, 0);
+      gzipped = fd >= 0;
+    }
+  }
+  if (fd < 0)
+    fd = open(filepath, O_RDONLY, 0);
   if (fd < 0 && !strchr(strrchr(filepath, '/'), '.'))
   {
-    /* Client-side route such as /chat (no file extension): the web UI picks the view. */
+    /* Client-side route such as /memory (no file extension): the web UI picks the view. */
     snprintf(filepath, sizeof(filepath), "%s/index.html", ctx->base_path);
     fd = open(filepath, O_RDONLY, 0);
+    gzipped = false;
   }
   if (fd < 0)
     return httpd_resp_send_404(req);
 
   set_file_headers(req, filepath);
+  if (gzipped)
+  {
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+  }
 
   ssize_t n;
   do
@@ -1098,7 +1169,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 16; /* room for the endpoints added in later milestones */
+  config.max_uri_handlers = 20; /* 18 in use with router lab mode, and room for later milestones */
   config.stack_size = 6144;
   config.open_fn = diag_open;
   config.lru_purge_enable = true; /* browsers open several sockets; recycle the oldest when full */
@@ -1112,6 +1183,11 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
   }
 
   const httpd_uri_t routes[] = {
+    /* Public: the login page calls these before it has a session. */
+    {.uri = "/api/v1/about", .method = HTTP_GET, .handler = about_get_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/session", .method = HTTP_POST, .handler = session_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/session", .method = HTTP_DELETE, .handler = session_delete_handler, .user_ctx = ctx},
+    /* Everything below needs a session (the Wi-Fi provisioning routes are open while the setup network is). */
     {.uri = "/api/v1/system/info", .method = HTTP_GET, .handler = system_info_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/link", .method = HTTP_GET, .handler = link_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/led", .method = HTTP_POST, .handler = led_post_handler, .user_ctx = ctx},
@@ -1119,15 +1195,16 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     {.uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = wifi_scan_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/provision", .method = HTTP_POST, .handler = wifi_provision_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/wifi/forget", .method = HTTP_POST, .handler = wifi_forget_post_handler, .user_ctx = ctx},
-    {.uri = "/api/v1/heaptop", .method = HTTP_GET, .handler = heaptop_get_handler, .user_ctx = ctx},
-    {.uri = "/api/v1/heaptop/clear", .method = HTTP_POST, .handler = heaptop_clear_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/memory", .method = HTTP_GET, .handler = memory_get_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/memory/clear", .method = HTTP_POST, .handler = memory_clear_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/router", .method = HTTP_GET, .handler = router_get_handler, .user_ctx = ctx},
 #if CONFIG_WIFI_BRIDGE_ROUTER_MODE
     {.uri = "/api/v1/router/capture", .method = HTTP_POST, .handler = router_capture_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/router/clear", .method = HTTP_POST, .handler = router_clear_post_handler, .user_ctx = ctx},
+    /* Public, like the login: the lab service is what students' devices call (it records only while capture is on). */
     {.uri = "/api/v1/router/lab", .method = HTTP_POST, .handler = router_lab_post_handler, .user_ctx = ctx},
 #endif
-    {.uri = "/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
     /* Last, so the API routes above win over the wildcard. It always exists: the setup
      * portal needs it even when no web UI is mounted. */
     {.uri = "/*", .method = HTTP_GET, .handler = static_get_handler, .user_ctx = ctx},
