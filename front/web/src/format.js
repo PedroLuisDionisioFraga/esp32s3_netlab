@@ -13,6 +13,12 @@ export function formatKiB(bytes) {
   return `${(bytes / 1024).toFixed(1)} KiB`
 }
 
+export function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return formatKiB(bytes)
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`
+}
+
 // Rough rule of thumb for 2.4 GHz links.
 export function signalQuality(rssi) {
   if (rssi >= -55) return { label: 'Excellent', bars: 4 }

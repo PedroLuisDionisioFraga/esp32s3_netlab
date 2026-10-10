@@ -54,3 +54,11 @@ export const getHeaptop = ({ view, sort, refresh, paused }) =>
   request(`/heaptop?${new URLSearchParams({ view, sort, refresh, paused: paused ? 1 : 0 })}`)
 // Like `ht clear`: min free, peaks, failures and trends start over.
 export const clearHeaptop = () => postJson('/heaptop/clear', {})
+// Router lab mode: lab network, clients, counters and, with capture on, flows, DNS names and lab
+// service requests. `{ enabled: false }` when the firmware is built without it.
+export const getRouter = () => request('/router')
+export const setCapture = (enabled) => postJson('/router/capture', { enabled })
+export const clearCapture = () => postJson('/router/clear', {})
+// The lab's plain-HTTP service: the device keeps the start of the body (only with capture on).
+export const sendLab = (text) =>
+  request('/router/lab', { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: text })
