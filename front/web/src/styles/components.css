@@ -1,0 +1,571 @@
+/* Components of src/ui and the small pieces the pages share. */
+
+/* ---------- Page header ---------- */
+.nl-page-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.nl-page-head h1 {
+  font-size: 24px;
+  letter-spacing: -0.015em;
+}
+
+.nl-page-sub {
+  margin-top: 2px;
+  color: var(--nl-muted);
+}
+
+/* ---------- Card ---------- */
+.nl-card {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius-card);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-card);
+}
+
+.nl-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: var(--nl-card-pad);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--nl-border-soft);
+}
+
+.nl-card-head h2,
+.nl-card-head h3 {
+  font-size: 15px;
+}
+
+.nl-card-sub {
+  margin-top: 2px;
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-card-body {
+  padding: var(--nl-card-pad);
+}
+
+.nl-card.is-flush .nl-card-body {
+  padding: 0;
+}
+
+.nl-card-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px var(--nl-card-pad);
+  border-top: 1px solid var(--nl-border-soft);
+}
+
+.nl-progress {
+  position: relative;
+  height: 3px;
+  overflow: hidden;
+  background-color: var(--nl-border-soft);
+}
+
+.nl-progress > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  border-radius: 3px;
+  background-color: var(--nl-primary);
+  animation: nl-slide 1.1s var(--nl-ease) infinite;
+}
+
+@keyframes nl-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* ---------- KPI tile ---------- */
+.nl-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: var(--nl-kpi-min);
+  padding: var(--nl-card-pad);
+  border: 1px solid var(--nl-border-soft);
+  border-radius: var(--nl-radius-card);
+  background-color: var(--nl-surface);
+  box-shadow: var(--nl-shadow-card);
+}
+
+.nl-kpi-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.nl-kpi-label {
+  color: var(--nl-text-strong);
+  font-weight: 600;
+}
+
+.nl-kpi-delta {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--nl-muted);
+}
+
+.nl-kpi-delta.is-down {
+  color: var(--nl-error);
+}
+
+.nl-kpi-delta.is-up {
+  color: var(--nl-success);
+}
+
+/* A big standalone figure keeps the font's proportional digits: tabular ones look loose at this size. */
+.nl-kpi-value {
+  color: var(--nl-text-strong);
+  font-size: var(--nl-kpi-value);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.nl-kpi-unit {
+  margin-left: 4px;
+  color: var(--nl-muted);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.nl-kpi-sub {
+  color: var(--nl-muted);
+  font-size: 12.5px;
+}
+
+.nl-kpi-spark {
+  margin-top: auto;
+}
+
+.nl-sparkline {
+  display: block;
+  width: 100%;
+}
+
+.nl-sparkline-base {
+  stroke: var(--nl-border-soft);
+  stroke-width: 1;
+}
+
+.nl-sparkline-line {
+  fill: none;
+  stroke: var(--nl-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nl-sparkline-last {
+  fill: var(--nl-primary);
+  stroke: var(--nl-surface);
+  stroke-width: 4;
+  paint-order: stroke;
+}
+
+/* ---------- Pills and the live badge ---------- */
+.nl-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background-color: var(--nl-surface-2);
+  color: var(--nl-text-strong);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.nl-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: var(--nl-muted);
+}
+
+.nl-pill-success {
+  background-color: var(--nl-success-bg);
+  color: var(--nl-success);
+}
+
+.nl-pill-success .nl-pill-dot {
+  background-color: var(--nl-dot-ok);
+}
+
+.nl-pill-warning {
+  background-color: var(--nl-warning-bg);
+  color: var(--nl-warning);
+}
+
+.nl-pill-warning .nl-pill-dot {
+  background-color: var(--nl-dot-warn);
+}
+
+.nl-pill-error {
+  background-color: var(--nl-error-bg);
+  color: var(--nl-error);
+}
+
+.nl-pill-error .nl-pill-dot {
+  background-color: var(--nl-dot-off);
+}
+
+.nl-pill-info {
+  background-color: var(--nl-info-bg);
+  color: var(--nl-info);
+}
+
+.nl-pill-info .nl-pill-dot {
+  background-color: var(--nl-info);
+}
+
+.nl-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  border: 1px solid var(--nl-success-border);
+  border-radius: 999px;
+  background-color: var(--nl-success-bg);
+  color: var(--nl-success);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.nl-live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--nl-dot-ok);
+}
+
+.nl-live-dot::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: var(--nl-dot-ok);
+  animation: nl-pulse 1.6s ease-out infinite;
+}
+
+.nl-live.is-warn {
+  border-color: var(--nl-warning-border);
+  background-color: var(--nl-warning-bg);
+  color: var(--nl-warning);
+}
+
+.nl-live.is-warn .nl-live-dot,
+.nl-live.is-warn .nl-live-dot::after {
+  background-color: var(--nl-dot-warn);
+}
+
+.nl-live.is-down {
+  border-color: var(--nl-error-border);
+  background-color: var(--nl-error-bg);
+  color: var(--nl-error);
+}
+
+.nl-live.is-down .nl-live-dot,
+.nl-live.is-down .nl-live-dot::after {
+  background-color: var(--nl-dot-off);
+}
+
+/* A badge that says "down" or "paused" does not pulse: only a live one moves. */
+.nl-live.is-warn .nl-live-dot::after,
+.nl-live.is-down .nl-live-dot::after {
+  animation: none;
+  opacity: 0;
+}
+
+@keyframes nl-pulse {
+  from {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(2.6);
+  }
+}
+
+/* ---------- Segmented control ---------- */
+.nl-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--nl-border);
+  border-radius: var(--nl-radius);
+  background-color: var(--nl-surface-2);
+}
+
+.nl-seg > button {
+  height: 32px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--nl-radius-sm);
+  background-color: transparent;
+  color: var(--nl-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--nl-t-fast) var(--nl-ease);
+}
+
+.nl-seg > button:hover {
+  color: var(--nl-text-strong);
+}
+
+/* The fill alone is too close to the track: a 1px inset ring marks the selection. */
+.nl-seg > button[aria-checked='true'] {
+  background-color: var(--nl-surface);
+  box-shadow: inset 0 0 0 1px var(--nl-primary);
+  color: var(--nl-text-strong);
+}
+
+@media (max-width: 639.98px) {
+  .nl-seg > button {
+    height: 40px;
+  }
+}
+
+/* ---------- Table ---------- */
+.nl-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.nl-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.nl-table th {
+  padding: 10px 14px;
+  background-color: var(--nl-surface-2);
+  color: var(--nl-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-align: right;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.nl-table td {
+  padding: 10px 14px;
+  border-top: 1px solid var(--nl-border-soft);
+  color: var(--nl-text-strong);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.nl-table .is-text {
+  text-align: left;
+}
+
+.nl-table tbody tr:hover td {
+  background-color: var(--nl-primary-soft);
+}
+
+.nl-table-state {
+  padding: 28px 14px !important;
+  color: var(--nl-muted) !important;
+  text-align: center !important;
+}
+
+.nl-table td .nl-pill {
+  margin-left: 8px;
+}
+
+/* ---------- Chips: toggle buttons and filters ---------- */
+.nl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--nl-border);
+  border-radius: 999px;
+  background-color: var(--nl-surface);
+  color: var(--nl-text);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--nl-t-fast) var(--nl-ease);
+}
+
+.nl-chip:hover {
+  background-color: var(--nl-surface-2);
+  color: var(--nl-text-strong);
+}
+
+/* The fill alone is too close to the card: a 1px inset ring in the accent marks the pressed state. */
+.nl-chip[aria-pressed='true'] {
+  border-color: var(--nl-primary);
+  background-color: var(--nl-primary-soft);
+  box-shadow: inset 0 0 0 1px var(--nl-primary);
+  color: var(--nl-text-strong);
+}
+
+.nl-chip-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background-color: var(--nl-surface-2);
+  color: var(--nl-muted);
+  font-size: 11.5px;
+}
+
+@media (max-width: 639.98px) {
+  .nl-chip {
+    height: 44px;
+  }
+}
+
+/* ---------- Overview ---------- */
+.nl-signal {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 22px;
+}
+
+.nl-signal i {
+  display: block;
+  width: 5px;
+  border-radius: 2px;
+  background-color: var(--nl-border);
+}
+
+.nl-signal i:nth-child(1) {
+  height: 6px;
+}
+
+.nl-signal i:nth-child(2) {
+  height: 11px;
+}
+
+.nl-signal i:nth-child(3) {
+  height: 16px;
+}
+
+.nl-signal i:nth-child(4) {
+  height: 22px;
+}
+
+.nl-signal i.is-on {
+  background-color: var(--nl-primary);
+}
+
+.nl-led-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---------- Chat ---------- */
+.nl-chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 52vh;
+  min-height: 140px;
+  margin: 0 0 16px;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.nl-chat-msg {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: var(--nl-radius);
+  background-color: var(--nl-surface-2);
+  color: var(--nl-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.nl-chat-msg.is-me {
+  align-self: flex-end;
+  background-color: var(--nl-primary-soft);
+}
+
+.nl-chat-who {
+  display: block;
+  color: var(--nl-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.nl-chat-form {
+  display: flex;
+  gap: 8px;
+}
+
+.nl-chat-form .nl-input {
+  flex: 1;
+}
+
+/* ---------- Network scan ---------- */
+.nl-scan {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-scan li {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px var(--nl-card-pad);
+  border-top: 1px solid var(--nl-border-soft);
+}
+
+.nl-scan li:first-child {
+  border-top: 0;
+}
+
+.nl-scan-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--nl-text-strong);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.nl-scan-meta {
+  color: var(--nl-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}

@@ -1,0 +1,185 @@
+/* Design tokens of the netlab UI. Everything else in the stylesheets reads these, never a raw colour.
+ *
+ * The palette grows out of netlab's own teal (#0f766e, the favicon and the old dashboard). Text and status pairs were
+ * picked for WCAG AA (4.5:1 for text, 3:1 for field borders and chart marks) in both themes. The chart series colours
+ * are slots 1-3 of the dataviz reference palette, validated against the card surfaces below. */
+
+:root {
+  color-scheme: light;
+
+  --nl-font: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --nl-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Surfaces */
+  --nl-bg: #f3f6f8;
+  --nl-surface: #ffffff;
+  --nl-surface-2: #eef3f5;
+  --nl-border: #d3dce2;
+  --nl-border-soft: #e5ebef;
+  --nl-field-border: #7b8d9b;
+
+  /* Ink */
+  --nl-text-strong: #0d1b22;
+  --nl-text: #2b3a45;
+  --nl-muted: #5a6975;
+
+  /* Accent */
+  --nl-primary: #0f766e;
+  --nl-primary-hover: #0b5f58;
+  --nl-primary-soft: #e1f2f0;
+  --nl-on-primary: #ffffff;
+
+  /* Status. Each is a text colour that clears 4.5:1 on its own background. */
+  --nl-success: #166534;
+  --nl-success-bg: #e7f5ec;
+  --nl-success-border: #b7e0c4;
+  --nl-warning: #8a4b05;
+  --nl-warning-bg: #fdf3e1;
+  --nl-warning-border: #f2d9a6;
+  --nl-error: #b42318;
+  --nl-error-bg: #fdecea;
+  --nl-error-border: #f3b9b3;
+  --nl-info: #075985;
+  --nl-info-bg: #e4f1f9;
+  --nl-info-border: #b5d6ea;
+  --nl-dot-ok: #16a34a;
+  --nl-dot-warn: #d97706;
+  --nl-dot-off: #dc2626;
+
+  /* Chart series (categorical slots 1-3) and the threshold colour (status "critical") */
+  --nl-series-1: #2a78d6;
+  --nl-series-2: #eb6834;
+  --nl-series-3: #1baf7a;
+  --nl-limit: #d03b3b;
+  --nl-map-scattered: #7b8d9b;
+
+  /* Sidebar and overlays */
+  --nl-sidebar-bg: linear-gradient(180deg, #0c2a2b 0%, #09191b 100%);
+  --nl-sidebar-text: #cfe0df;
+  --nl-sidebar-muted: #8fa8a7;
+  --nl-sidebar-hover: rgba(255, 255, 255, 0.07);
+  --nl-sidebar-active-bg: rgba(94, 234, 212, 0.14);
+  --nl-sidebar-active-text: #f0fffd;
+  --nl-sidebar-accent: #5eead4;
+  --nl-backdrop: rgba(7, 20, 22, 0.55);
+  --nl-toast-bg: #0c2a2b;
+  --nl-toast-text: #f0fffd;
+
+  /* Shape and depth */
+  --nl-radius: 8px;
+  --nl-radius-sm: 6px;
+  --nl-radius-card: 12px;
+  --nl-shadow-card: 0 1px 2px rgba(13, 27, 34, 0.05), 0 6px 18px rgba(13, 27, 34, 0.05);
+  --nl-shadow-pop: 0 10px 32px rgba(13, 27, 34, 0.18);
+
+  /* Layout and density */
+  --nl-sidebar-w: 264px;
+  --nl-rail-w: 68px;
+  --nl-header-h: 56px;
+  --nl-main-pad: 28px;
+  --nl-gap: 16px;
+  --nl-card-pad: 18px 20px;
+  --nl-kpi-value: 34px;
+  --nl-kpi-min: 148px;
+
+  /* Motion */
+  --nl-ease: cubic-bezier(0.2, 0, 0, 1);
+  --nl-t-fast: 150ms;
+  --nl-t: 200ms;
+
+  /* Layers */
+  --z-sidebar: 40;
+  --z-header: 30;
+  --z-dialog: 90;
+  --z-pop: 100;
+  --z-toast: 120;
+}
+
+/* Dark: the same roles on dark surfaces, stepped by hand (not inverted). Two selectors carry the same block: the
+ * media query follows the system, the attribute follows the toggle and wins both ways. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --nl-bg: #0e1418;
+    --nl-surface: #182027;
+    --nl-surface-2: #1f2a33;
+    --nl-border: #314250;
+    --nl-border-soft: #25323d;
+    --nl-field-border: #6f8394;
+    --nl-text-strong: #e9eff4;
+    --nl-text: #b7c4cf;
+    --nl-muted: #8d9eac;
+    --nl-primary: #2dd4bf;
+    --nl-primary-hover: #5eead4;
+    --nl-primary-soft: #11302e;
+    --nl-on-primary: #04201d;
+    --nl-success: #6ee7a0;
+    --nl-success-bg: rgba(34, 197, 94, 0.14);
+    --nl-success-border: rgba(34, 197, 94, 0.35);
+    --nl-warning: #fbbf6a;
+    --nl-warning-bg: rgba(245, 158, 11, 0.14);
+    --nl-warning-border: rgba(245, 158, 11, 0.35);
+    --nl-error: #ff8a80;
+    --nl-error-bg: rgba(239, 68, 68, 0.15);
+    --nl-error-border: rgba(239, 68, 68, 0.4);
+    --nl-info: #7cc4ee;
+    --nl-info-bg: rgba(56, 189, 248, 0.13);
+    --nl-info-border: rgba(56, 189, 248, 0.35);
+    --nl-series-1: #3987e5;
+    --nl-series-2: #d95926;
+    --nl-series-3: #199e70;
+    --nl-map-scattered: #6f8394;
+    --nl-sidebar-bg: #0b1115;
+    --nl-toast-bg: #26333d;
+    --nl-toast-text: #f0f6fa;
+    --nl-shadow-card: 0 2px 16px rgba(0, 0, 0, 0.4);
+    --nl-shadow-pop: 0 10px 32px rgba(0, 0, 0, 0.55);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --nl-bg: #0e1418;
+  --nl-surface: #182027;
+  --nl-surface-2: #1f2a33;
+  --nl-border: #314250;
+  --nl-border-soft: #25323d;
+  --nl-field-border: #6f8394;
+  --nl-text-strong: #e9eff4;
+  --nl-text: #b7c4cf;
+  --nl-muted: #8d9eac;
+  --nl-primary: #2dd4bf;
+  --nl-primary-hover: #5eead4;
+  --nl-primary-soft: #11302e;
+  --nl-on-primary: #04201d;
+  --nl-success: #6ee7a0;
+  --nl-success-bg: rgba(34, 197, 94, 0.14);
+  --nl-success-border: rgba(34, 197, 94, 0.35);
+  --nl-warning: #fbbf6a;
+  --nl-warning-bg: rgba(245, 158, 11, 0.14);
+  --nl-warning-border: rgba(245, 158, 11, 0.35);
+  --nl-error: #ff8a80;
+  --nl-error-bg: rgba(239, 68, 68, 0.15);
+  --nl-error-border: rgba(239, 68, 68, 0.4);
+  --nl-info: #7cc4ee;
+  --nl-info-bg: rgba(56, 189, 248, 0.13);
+  --nl-info-border: rgba(56, 189, 248, 0.35);
+  --nl-series-1: #3987e5;
+  --nl-series-2: #d95926;
+  --nl-series-3: #199e70;
+  --nl-map-scattered: #6f8394;
+  --nl-sidebar-bg: #0b1115;
+  --nl-toast-bg: #26333d;
+  --nl-toast-text: #f0f6fa;
+  --nl-shadow-card: 0 2px 16px rgba(0, 0, 0, 0.4);
+  --nl-shadow-pop: 0 10px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Compact: the same screens with less air, for a small laptop or a wall display. */
+:root[data-density='compact'] {
+  --nl-main-pad: 18px;
+  --nl-gap: 10px;
+  --nl-card-pad: 14px 16px;
+  --nl-kpi-value: 26px;
+  --nl-kpi-min: 118px;
+}
