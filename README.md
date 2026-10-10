@@ -27,7 +27,7 @@ Boot sequence (`main/app_main.c`):
 
 | Part | Role |
 |---|---|
-| `components/wifi_bridge` | Wi-Fi manager: saved network in NVS, reconnect, setup network, captive-portal DNS, provisioning, scan. The router-to-AP bridge (NAT) comes in milestone 4. |
+| `components/wifi_bridge` | Wi-Fi manager: saved network in NVS, reconnect, setup network, captive-portal DNS, provisioning, scan. Optional [router lab mode](#router-lab-mode-classroom): a second Wi-Fi network routed through NAT, with flow and DNS metadata (`traffic_observer.c`). |
 | `components/chip_health` | Internal temperature sensor, heap, uptime, reset reason. |
 | `components/heap_monitor` | Runs [heaptop](https://components.espressif.com/components/pedroluisdionisiofraga/heaptop) and renders its `ht` console views as text for the `/heaptop` page. |
 | `components/notification_manager` | Owns the onboard LED. One worker task is the only LED writer; `wifi_bridge` sets a `NOTIF_EVT_CONN_*` event bit and the worker shows the matching status color. The web UI's manual color overrides it. |
@@ -171,6 +171,103 @@ command prints: the device renders it with heaptop's own code, so the columns ma
 What each number means is in the heaptop README (*Heap basics in one minute*, *Health checks*). Memory is
 charged to the task that allocated it, so the page's own requests show up under `httpd`.
 
+## Router lab mode (classroom)
+
+Off by default. When enabled, the S3 becomes a small router for an **authorized classroom lab**: once it
+is online through the saved network (the *uplink*), it opens a second WPA2 network, the **lab network**,
+gives its clients addresses by DHCP and routes them to the uplink through IPv4 NAT. The **Router lab**
+page (`http://netlab.local/router`) shows the lab clients and, only while **capture** is on, which
+addresses, ports and DNS names they reach.
+
+```text
+ internet ── lab router / AP (uplink, saved network) ── S3 ── lab network "Netlab-Lab" ── student devices
+                                                        └─ dashboard: http://netlab.local/router (uplink side)
+```
+
+### Rules
+
+- Use it only on a network you run, with devices whose owners agreed to be observed. Say when capture is on.
+- The lab network has **its own name**. It never takes the name of the uplink or of any other real network:
+  it refuses to open when its name equals the uplink's, and it is always WPA2-protected.
+- **What is recorded** (RAM only, gone at reboot or *Clear*): per flow the client address, destination
+  address, destination port, protocol, packet and byte counts (client to destination) and when it was
+  seen; the most recent DNS names asked; requests sent to the lab service. The tables are bounded
+  (64 flows and 16 DNS names by default): when the flow table is full, the flow seen least recently is
+  dropped (*Flows dropped*). Only the two totals (packets and bytes of all lab clients together) are
+  counted with capture off.
+- **What is never recorded:** packet payloads, passwords, cookies, page contents. HTTPS traffic stays
+  encrypted: the S3 only forwards it and sees the destination address and port, never what is inside.
+  There is no DNS hijacking, no captive portal and no TLS interception on the lab network.
+- The **lab service** (`POST /api/v1/router/lab`) is the class's own plain-HTTP server: the page shows the
+  start of each request body it received, to show what any HTTP server (and anyone on the path, without
+  TLS) can read. Only while capture is on. Never send a real password to it.
+- Capture can only be started, stopped or cleared from the **uplink side** (`403` from lab clients).
+  That is a convenience, not security: the dashboard has no login (see [Notes](#notes)).
+
+### Setup
+
+1. `idf.py menuconfig` -> *Wi-Fi bridge* -> **Router lab mode**. Set the lab network name and password
+   (8 to 63 characters). The defaults are `Netlab-Lab` / `netlablab`: change the password.
+2. If the uplink already uses `192.168.4.x`, set *Lab network address* to another /24 (for example
+   `192.168.42.1`). The setup network moves to that address too, since both use the same soft AP.
+3. Build and flash (`idf.py -p COMx build flash monitor`). The forwarding options (`LWIP_IP_FORWARD`,
+   `LWIP_IPV4_NAPT`) are selected automatically.
+4. Provision the uplink as usual. Once online, the log prints `Lab network 'Netlab-Lab' is open and routed
+   to the uplink`. Join it from the student devices.
+5. Open the Router lab page from a computer on the uplink network and press **Start capture** when the class
+   is ready. **Export JSON** downloads everything shown on the page.
+
+**Rollback:** disable *Router lab mode* in `menuconfig` and flash again. The firmware is then exactly the
+dashboard and setup flow described above; the saved network is kept.
+
+### How it behaves
+
+- The lab network exists only while the uplink is up. When the uplink is lost, the lab network closes at
+  once (its clients see the network disappear, so nobody keeps a stale address with no internet), and the
+  device retries and opens the setup network as usual. It reopens when the uplink is back.
+- **One radio:** the lab network always sits on the uplink's channel, and every packet crosses the air
+  twice. Expect a few Mbit/s at best, less with several clients: the counters are there to show the cost,
+  not to promise router speed. Up to 4 clients by default (8 at most).
+- Only IPv4 is routed. Byte counts are client-to-destination only: replies are not counted.
+
+### Classroom exercises
+
+1. **What a router sees.** Capture on, students browse a few sites. Compare the DNS names and destination
+   addresses with what they visited. Which sites can be told apart only by address?
+2. **HTTP vs HTTPS.** Send text to the lab service from the page, or `curl -X POST
+   http://192.168.4.1/api/v1/router/lab -d 'hello'` from a lab client: the page shows the text. Then open an
+   HTTPS site and find its flow: only the address and port 443 are visible.
+3. **NAT.** Compare a client's lab address (`192.168.4.x`) with the address the uplink router sees for all
+   of them (the S3's own address in the *Wi-Fi link* card).
+4. **Cost of a hop.** Run a speed test on the uplink and on the lab network, with one and with three clients.
+
+### Lab troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| Page says *The uplink uses the lab network's subnet* | Change *Lab network address* to a /24 the uplink does not use, then flash again. |
+| Page says *The lab network name is the uplink's name* | Choose a different *Lab network name*. |
+| Clients join but get no address | The log should show the DHCP server starting. Too many clients: raise *Maximum devices on the lab network* (8 at most). |
+| Clients get an address but no internet | The log says `NAT did not start`, or the uplink is down. Check the *Wi-Fi link* card. |
+| Addresses work, names do not | The uplink gave no DNS server (`The uplink gave no DNS server` in the log). Fix the uplink's DHCP. |
+| Lab network vanished for a moment | The uplink dropped or changed channel. The lab network follows the uplink and comes back on its own. |
+| A student device keeps using the uplink | It also knows the uplink network. Forget the uplink on that device so it only joins `Netlab-Lab`. |
+| Capture buttons answer `403` | You are on the lab network. Use a computer on the uplink network. |
+
+### Checks
+
+The packet parser has a host test (needs a C compiler on the PC), from the repo root:
+
+```sh
+gcc -Wall -Wextra -I components/wifi_bridge components/wifi_bridge/host_test/test_traffic_parse.c \
+    components/wifi_bridge/traffic_parse.c -o test_traffic_parse && ./test_traffic_parse
+```
+
+On hardware: build with the mode off and on; join the lab network from two devices and check the lease,
+DNS and an HTTP site through the NAT; check that flows appear only with capture on and stop at once when it
+is turned off; unplug the uplink router and check that the lab network closes and the setup network opens
+after the usual delay; plug it back and check that the lab network returns.
+
 ## LED colors
 
 | Color | Meaning |
@@ -198,8 +295,13 @@ default (`menuconfig` -> *Status LED*), because a WS2812 at full power is blindi
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
 | `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=50..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
 | `/api/v1/heaptop/clear` | POST | start a fresh measurement window (`ht clear`) |
+| `/api/v1/router` | GET | router lab: lab network, clients, counters, flows, DNS names, lab service requests (`{"enabled":false}` without router lab mode). This is also the export. |
+| `/api/v1/router/capture` | POST | `{"enabled":true\|false}`: start or stop the capture (`403` from the lab network) |
+| `/api/v1/router/clear` | POST | forget flows, DNS names, lab service requests and counters (`403` from the lab network) |
+| `/api/v1/router/lab` | POST | any text: the lab service keeps the start of the body (`409` while capture is off) |
 
-`wifi/provision` only works while the setup network is open (`409` otherwise).
+`wifi/provision` only works while the setup network is open (`409` otherwise). The `router/*` POST routes
+only exist with router lab mode.
 
 ```powershell
 curl http://netlab.local/api/v1/system/info
@@ -229,7 +331,9 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 
 - **No authentication on the dashboard/API.** Keep it on your home LAN and never port-forward it. Anyone
   on the LAN can call `wifi/forget` (which restarts the device into setup mode), and anyone who knows
-  the setup network password can reconfigure the device while the setup network is open.
+  the setup network password can reconfigure the device while the setup network is open. In router lab
+  mode the same goes for lab clients: they can open the dashboard (including the Router lab page with
+  every client's records) and call `wifi/forget`; only the capture controls refuse them.
 - **Heap monitor costs.** heaptop takes about 32 KB of internal RAM (no PSRAM is enabled): its buffers
   plus its 4 KB sampler task. The boot line `HEAPTOP: started: ...` prints the measured number. The page's
   buffers take about 8 KB more. The options heaptop reads are on in `sdkconfig.defaults`. Heap task
@@ -254,5 +358,6 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 1. Skeleton, LED, chip temperature, Wi-Fi link, self-configuring Wi-Fi (this milestone)
 2. Network monitor: ping targets, history, outage log, baseline speed test
 3. Wi-Fi analyzer: scan, channel congestion chart
-4. Bridge mode: softAP + NAT so the S3 can replace the router's Wi-Fi, with a safe fallback
+4. Bridge mode: softAP + NAT so the S3 can replace the router's Wi-Fi, with a safe fallback (the
+   classroom [router lab mode](#router-lab-mode-classroom) is the first step)
 5. A/B comparison: direct vs bridged speed, default vs tuned Wi-Fi settings
