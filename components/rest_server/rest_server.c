@@ -16,9 +16,11 @@
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "heap_monitor.h"
 #include "lwip/sockets.h"
 #include "notification_manager.h"
+#include "sdkconfig.h"
 #include "wifi_bridge.h"
 
 #define BASE_PATH_MAX     16
@@ -32,6 +34,21 @@
 #define CREDENTIAL_MAX    64
 #define ENCODING_MAX      64
 
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+#define ROUTER_CLIENTS_MAX 8 /* CONFIG_WIFI_BRIDGE_ROUTER_MAX_CLIENTS is at most 8 */
+#define LAB_MESSAGES_MAX   8
+#define LAB_TEXT_MAX       120
+
+/* A request the lab service received: what any plain-HTTP server gets to read. */
+typedef struct
+{
+  char client[16];
+  uint32_t at_s;
+  size_t length;
+  char text[LAB_TEXT_MAX + 1]; /* the start of the body */
+} lab_message_t;
+#endif
+
 static const char *TAG = "rest_server";
 
 /* The setup page is compiled into the firmware (see EMBED_FILES in CMakeLists.txt). */
@@ -43,6 +60,10 @@ typedef struct
   char base_path[BASE_PATH_MAX];
   char hostname[HOSTNAME_MAX];
   char scratch[SCRATCH_BUFSIZE]; /* shared by all handlers: esp_http_server runs them on one task */
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+  lab_message_t lab[LAB_MESSAGES_MAX]; /* a ring, cleared with the capture */
+  size_t lab_next;
+#endif
 } rest_ctx_t;
 
 /* ---------- helpers ---------- */
@@ -105,16 +126,17 @@ static bool require_session_unless_setup(httpd_req_t *req)
   return wifi_bridge_setup_ap_active() || require_session(req);
 }
 
-/* Reads and parses the request body. Returns NULL after sending the error response itself. */
-static cJSON *recv_json_body(httpd_req_t *req)
+/* Reads the whole body into ctx->scratch, NUL-terminated. Returns false after sending the error
+ * response itself. */
+static bool recv_body(httpd_req_t *req)
 {
   rest_ctx_t *ctx = req->user_ctx;
   size_t total = req->content_len;
 
   if (total == 0 || total >= sizeof(ctx->scratch))
   {
-    send_error(req, "400 Bad Request", "Missing or oversized JSON body");
-    return NULL;
+    send_error(req, "400 Bad Request", "Missing or oversized request body");
+    return false;
   }
 
   size_t received = 0;
@@ -128,11 +150,20 @@ static cJSON *recv_json_body(httpd_req_t *req)
     if (n <= 0)
     {
       httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to read request body");
-      return NULL;
+      return false;
     }
     received += n;
   }
   ctx->scratch[total] = '\0';
+  return true;
+}
+
+/* Reads and parses the request body. Returns NULL after sending the error response itself. */
+static cJSON *recv_json_body(httpd_req_t *req)
+{
+  rest_ctx_t *ctx = req->user_ctx;
+  if (!recv_body(req))
+    return NULL;
 
   cJSON *root = cJSON_Parse(ctx->scratch);
   if (!root)
@@ -551,6 +582,352 @@ static esp_err_t memory_clear_post_handler(httpd_req_t *req)
   return send_json(req, root);
 }
 
+/* ---------- router lab ---------- */
+
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+
+static uint32_t uptime_s(void)
+{
+  return (uint32_t)(esp_timer_get_time() / 1000000);
+}
+
+/* IPv4 address of the client. The server listens on IPv6, so IPv4 clients show up as ::ffff:a.b.c.d. */
+static bool peer_ipv4(httpd_req_t *req, struct in_addr *out)
+{
+  struct sockaddr_storage addr;
+  socklen_t len = sizeof(addr);
+  if (getpeername(httpd_req_to_sockfd(req), (struct sockaddr *)&addr, &len) != 0)
+    return false;
+
+  if (addr.ss_family == AF_INET)
+  {
+    *out = ((const struct sockaddr_in *)&addr)->sin_addr;
+    return true;
+  }
+  const struct sockaddr_in6 *addr6 = (const struct sockaddr_in6 *)&addr;
+  if (addr.ss_family == AF_INET6 && IN6_IS_ADDR_V4MAPPED(&addr6->sin6_addr))
+  {
+    memcpy(&out->s_addr, &addr6->sin6_addr.s6_addr[12], sizeof(out->s_addr));
+    return true;
+  }
+  return false;
+}
+
+/* On top of the login: only the uplink side (the instructor) turns the capture on or off and wipes it, even with
+ * the admin password typed on a lab client. */
+static bool from_lab_network(httpd_req_t *req)
+{
+  wifi_bridge_router_status_t st;
+  wifi_bridge_router_get_status(&st);
+  if (!st.active)
+    return false;
+
+  struct in_addr peer;
+  struct in_addr lab;
+  if (!peer_ipv4(req, &peer) || !inet_aton(st.ip, &lab))
+    return true; /* cannot tell: treat it as a lab client */
+
+  const uint32_t mask = htonl(0xffffff00UL); /* the lab network is a /24 */
+  return (peer.s_addr & mask) == (lab.s_addr & mask);
+}
+
+/* Builds a response in the scratch buffer and sends it in chunks of up to its size, so a full flow
+ * table never becomes one big cJSON tree (that would take tens of KB of internal RAM). */
+typedef struct
+{
+  httpd_req_t *req;
+  char *buf;
+  size_t len;
+  esp_err_t err;
+} json_stream_t;
+
+static void stream_flush(json_stream_t *s)
+{
+  if (s->err == ESP_OK && s->len > 0)
+    s->err = httpd_resp_send_chunk(s->req, s->buf, s->len);
+  s->len = 0;
+}
+
+/* Short literal text only (shorter than the buffer). */
+static void stream_text(json_stream_t *s, const char *text)
+{
+  const size_t n = strlen(text);
+  if (s->len + n >= SCRATCH_BUFSIZE)
+    stream_flush(s);
+  memcpy(s->buf + s->len, text, n);
+  s->len += n;
+}
+
+/* Appends `item` and frees it; a comma first unless it opens its array. */
+static void stream_item(json_stream_t *s, bool first, cJSON *item)
+{
+  if (!first)
+    stream_text(s, ",");
+
+  /* cJSON may need a few bytes more than it prints: when the rest of the buffer is too small,
+   * send what is there and print again into the empty buffer. */
+  if (!item)
+    s->err = ESP_ERR_NO_MEM;
+  else if (!cJSON_PrintPreallocated(item, s->buf + s->len, (int)(SCRATCH_BUFSIZE - s->len), false))
+  {
+    stream_flush(s);
+    if (!cJSON_PrintPreallocated(item, s->buf, SCRATCH_BUFSIZE, false))
+      s->err = ESP_ERR_NO_MEM;
+  }
+  if (s->err == ESP_OK)
+    s->len += strlen(s->buf + s->len);
+  cJSON_Delete(item);
+}
+
+static cJSON *client_json(const wifi_bridge_router_client_t *c)
+{
+  cJSON *item = cJSON_CreateObject();
+  if (!item)
+    return NULL;
+
+  cJSON_AddStringToObject(item, "mac", c->mac);
+  if (c->ip[0] != '\0')
+    cJSON_AddStringToObject(item, "ip", c->ip);
+  else
+    cJSON_AddNullToObject(item, "ip");
+  cJSON_AddNumberToObject(item, "rssi", c->rssi);
+  return item;
+}
+
+static cJSON *flow_json(const wifi_bridge_router_flow_t *f)
+{
+  cJSON *item = cJSON_CreateObject();
+  if (!item)
+    return NULL;
+
+  cJSON_AddStringToObject(item, "client", f->client);
+  cJSON_AddStringToObject(item, "dst", f->dst);
+  cJSON_AddNumberToObject(item, "port", f->port);
+  cJSON_AddNumberToObject(item, "proto", f->proto);
+  cJSON_AddNumberToObject(item, "packets", f->packets);
+  cJSON_AddNumberToObject(item, "bytes", (double)f->bytes);
+  cJSON_AddNumberToObject(item, "first_s", f->first_s);
+  cJSON_AddNumberToObject(item, "last_s", f->last_s);
+  return item;
+}
+
+static cJSON *dns_json(const wifi_bridge_router_dns_t *d)
+{
+  cJSON *item = cJSON_CreateObject();
+  if (!item)
+    return NULL;
+
+  cJSON_AddStringToObject(item, "client", d->client);
+  cJSON_AddStringToObject(item, "name", d->name);
+  cJSON_AddNumberToObject(item, "at_s", d->at_s);
+  return item;
+}
+
+static cJSON *lab_json(const lab_message_t *m)
+{
+  cJSON *item = cJSON_CreateObject();
+  if (!item)
+    return NULL;
+
+  cJSON_AddStringToObject(item, "client", m->client);
+  cJSON_AddNumberToObject(item, "at_s", m->at_s);
+  cJSON_AddNumberToObject(item, "length", m->length);
+  cJSON_AddStringToObject(item, "text", m->text);
+  return item;
+}
+
+/* The lab network and its clients, the counters, and the records: flows, DNS names (newest first)
+ * and lab service requests (newest first). Every list is bounded by its table, so this is also the
+ * export. */
+static esp_err_t router_get_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  rest_ctx_t *ctx = req->user_ctx;
+  wifi_bridge_router_status_t st;
+  wifi_bridge_router_get_status(&st);
+
+  cJSON *head = cJSON_CreateObject();
+  if (!head)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(head, "enabled", true);
+  cJSON_AddBoolToObject(head, "active", st.active);
+  cJSON_AddStringToObject(head, "ssid", st.ssid);
+  cJSON_AddStringToObject(head, "ip", st.ip);
+  cJSON_AddNumberToObject(head, "channel", st.channel);
+  cJSON_AddNumberToObject(head, "max_clients", st.max_clients);
+  if (st.problem[0] != '\0')
+    cJSON_AddStringToObject(head, "problem", st.problem);
+  else
+    cJSON_AddNullToObject(head, "problem");
+  cJSON_AddBoolToObject(head, "capture", st.capture);
+  cJSON_AddNumberToObject(head, "now_s", uptime_s());
+  cJSON_AddNumberToObject(head, "packets", st.packets);
+  cJSON_AddNumberToObject(head, "bytes", (double)st.bytes);
+  cJSON_AddNumberToObject(head, "flows_dropped", st.flows_dropped);
+  cJSON_AddNumberToObject(head, "flows_max", st.flows_max);
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  json_stream_t s = {.req = req, .buf = ctx->scratch};
+  stream_item(&s, true, head);
+  if (s.err == ESP_OK)
+    s.len--; /* drop the closing brace: the lists follow */
+
+  wifi_bridge_router_client_t clients[ROUTER_CLIENTS_MAX];
+  const size_t client_count = wifi_bridge_router_get_clients(clients, ROUTER_CLIENTS_MAX);
+  stream_text(&s, ",\"clients\":[");
+  for (size_t i = 0; i < client_count; i++)
+    stream_item(&s, i == 0, client_json(&clients[i]));
+
+  stream_text(&s, "],\"flows\":[");
+  size_t count = 0;
+  for (size_t slot = 0; slot < st.flows_max && s.err == ESP_OK; slot++)
+  {
+    wifi_bridge_router_flow_t flow;
+    if (wifi_bridge_router_get_flow(slot, &flow))
+      stream_item(&s, count++ == 0, flow_json(&flow));
+  }
+
+  stream_text(&s, "],\"dns\":[");
+  count = 0;
+  for (size_t age = 0; age < st.dns_max && s.err == ESP_OK; age++)
+  {
+    wifi_bridge_router_dns_t dns;
+    if (wifi_bridge_router_get_dns(age, &dns))
+      stream_item(&s, count++ == 0, dns_json(&dns));
+  }
+
+  stream_text(&s, "],\"lab\":[");
+  count = 0;
+  for (size_t age = 0; age < LAB_MESSAGES_MAX && s.err == ESP_OK; age++)
+  {
+    const lab_message_t *m = &ctx->lab[(ctx->lab_next + LAB_MESSAGES_MAX - 1 - age) % LAB_MESSAGES_MAX];
+    if (m->client[0] != '\0')
+      stream_item(&s, count++ == 0, lab_json(m));
+  }
+
+  stream_text(&s, "]}");
+  stream_flush(&s);
+  if (s.err != ESP_OK)
+  {
+    ESP_LOGW(TAG, "Router status not sent: %s", esp_err_to_name(s.err));
+    return ESP_FAIL; /* the response is cut: close the connection */
+  }
+  return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+/* Body: {"enabled":true|false}. */
+static esp_err_t router_capture_post_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  if (from_lab_network(req))
+    return send_error(req, "403 Forbidden", "Capture is changed from the uplink network, not from the lab network");
+
+  cJSON *body = recv_json_body(req);
+  if (!body)
+    return ESP_OK; /* error response already sent */
+
+  const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(body, "enabled");
+  const bool valid = cJSON_IsBool(enabled);
+  const bool on = cJSON_IsTrue(enabled);
+  cJSON_Delete(body);
+  if (!valid)
+    return send_error(req, "400 Bad Request", "Expected {\"enabled\": true|false}");
+
+  wifi_bridge_router_set_capture(on);
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "ok", true);
+  cJSON_AddBoolToObject(root, "capture", on);
+  return send_json(req, root);
+}
+
+/* Forgets the flows, DNS names, lab service requests and counters. */
+static esp_err_t router_clear_post_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  rest_ctx_t *ctx = req->user_ctx;
+  if (from_lab_network(req))
+    return send_error(req, "403 Forbidden", "The capture is cleared from the uplink network, not from the lab network");
+
+  wifi_bridge_router_clear();
+  memset(ctx->lab, 0, sizeof(ctx->lab));
+  ctx->lab_next = 0;
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "ok", true);
+  return send_json(req, root);
+}
+
+/* Body: any text. The lab's own plain-HTTP service: the dashboard shows the start of what it
+ * received, which is what every HTTP server (and anyone on the path, without TLS) can read.
+ * Recorded only while capture is on. */
+static esp_err_t router_lab_post_handler(httpd_req_t *req)
+{
+  rest_ctx_t *ctx = req->user_ctx;
+  wifi_bridge_router_status_t st;
+  wifi_bridge_router_get_status(&st);
+  if (!st.capture)
+    return send_error(req, "409 Conflict", "Capture is off: the lab service records nothing");
+
+  if (!recv_body(req))
+    return ESP_OK; /* error response already sent */
+
+  lab_message_t *m = &ctx->lab[ctx->lab_next];
+  ctx->lab_next = (ctx->lab_next + 1) % LAB_MESSAGES_MAX;
+  memset(m, 0, sizeof(*m));
+
+  struct in_addr peer;
+  if (!peer_ipv4(req, &peer) || !inet_ntoa_r(peer, m->client, sizeof(m->client)))
+    strlcpy(m->client, "?", sizeof(m->client));
+  m->at_s = uptime_s();
+  m->length = req->content_len;
+  for (size_t i = 0; i < LAB_TEXT_MAX && ctx->scratch[i] != '\0'; i++)
+  {
+    const char c = ctx->scratch[i];
+    m->text[i] = (c >= ' ' && c < 0x7f) ? c : '?';
+  }
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "ok", true);
+  cJSON_AddNumberToObject(root, "length", m->length);
+  return send_json(req, root);
+}
+
+#else
+
+static esp_err_t router_get_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  cJSON *root = cJSON_CreateObject();
+  if (!root)
+    return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
+
+  cJSON_AddBoolToObject(root, "enabled", false); /* built without router lab mode */
+  return send_json(req, root);
+}
+
+#endif /* CONFIG_WIFI_BRIDGE_ROUTER_MODE */
+
 /* ---------- setup portal ---------- */
 
 static esp_err_t send_setup_page(httpd_req_t *req)
@@ -792,7 +1169,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 20; /* 14 in use, and room for the endpoints added in later milestones */
+  config.max_uri_handlers = 20; /* 18 in use with router lab mode, and room for later milestones */
   config.stack_size = 6144;
   config.open_fn = diag_open;
   config.lru_purge_enable = true; /* browsers open several sockets; recycle the oldest when full */
@@ -821,6 +1198,13 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     {.uri = "/api/v1/memory", .method = HTTP_GET, .handler = memory_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/memory/clear", .method = HTTP_POST, .handler = memory_clear_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/router", .method = HTTP_GET, .handler = router_get_handler, .user_ctx = ctx},
+#if CONFIG_WIFI_BRIDGE_ROUTER_MODE
+    {.uri = "/api/v1/router/capture", .method = HTTP_POST, .handler = router_capture_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/router/clear", .method = HTTP_POST, .handler = router_clear_post_handler, .user_ctx = ctx},
+    /* Public, like the login: the lab service is what students' devices call (it records only while capture is on). */
+    {.uri = "/api/v1/router/lab", .method = HTTP_POST, .handler = router_lab_post_handler, .user_ctx = ctx},
+#endif
     /* Last, so the API routes above win over the wildcard. It always exists: the setup
      * portal needs it even when no web UI is mounted. */
     {.uri = "/*", .method = HTTP_GET, .handler = static_get_handler, .user_ctx = ctx},

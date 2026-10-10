@@ -39,6 +39,12 @@ export const router = createRouter({
       meta: { title: 'Network', nav: { label: 'Network', icon: 'wifi', order: 30 } },
     },
     {
+      path: '/router',
+      name: 'router',
+      component: () => import('./pages/RouterPage.vue'),
+      meta: { title: 'Router lab', nav: { label: 'Router lab', icon: 'router', order: 35 } },
+    },
+    {
       path: '/chat',
       name: 'chat',
       component: () => import('./pages/ChatPage.vue'),

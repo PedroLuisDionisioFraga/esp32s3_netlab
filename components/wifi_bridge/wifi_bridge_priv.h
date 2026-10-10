@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "wifi_bridge.h"
 
 /* Saved router credentials (NVS namespace "netlab"). */
 
@@ -22,5 +23,12 @@ esp_err_t wifi_bridge_nvs_erase(void);
 esp_err_t dns_catch_all_start(uint32_t ip_addr);
 /** Blocks briefly until the server task has closed its socket. */
 void dns_catch_all_stop(void);
+
+/* Router lab mode: what lab clients send through the NAT (traffic_observer.c). */
+
+/** @param lab_netif  The lwIP netif of the lab network, or NULL while it is closed. */
+void traffic_observer_attach(void *lab_netif);
+/** Fills the capture flag and the counters of @p out. */
+void traffic_observer_get_totals(wifi_bridge_router_status_t *out);
 
 #endif  // WIFI_BRIDGE_PRIV_H

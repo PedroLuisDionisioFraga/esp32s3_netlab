@@ -80,3 +80,73 @@ export const scanNetworks = () =>
 /** Erases the saved router and restarts the device into Wi-Fi setup mode. */
 export const forgetWifi = () => authApi('/api/v1/wifi/forget', { body: {} })
 export const sendChat = (message: string) => authApi<{ message: string }>('/api/v1/chat', { body: { message } })
+
+// ---- Router lab (firmware built with router lab mode) ----
+
+export interface RouterClient {
+  mac: string
+  /** null until the client has a DHCP lease. */
+  ip: string | null
+  rssi: number
+}
+
+export interface RouterFlow {
+  client: string
+  dst: string
+  /** 0 for ICMP. */
+  port: number
+  /** IP protocol number: 1 ICMP, 6 TCP, 17 UDP. */
+  proto: number
+  packets: number
+  /** Client to destination only. */
+  bytes: number
+  /** Seconds since boot, like `now_s`. */
+  first_s: number
+  last_s: number
+}
+
+export interface RouterDns {
+  client: string
+  name: string
+  at_s: number
+}
+
+/** A request the lab service received. */
+export interface LabMessage {
+  client: string
+  at_s: number
+  length: number
+  /** The start of the body. */
+  text: string
+}
+
+export interface RouterLab {
+  enabled: true
+  active: boolean
+  ssid: string
+  ip: string
+  channel: number
+  max_clients: number
+  /** Why the lab network did not open although the device is online. */
+  problem: string | null
+  capture: boolean
+  /** The device's uptime: the `*_s` times count from the same boot. */
+  now_s: number
+  packets: number
+  bytes: number
+  flows_dropped: number
+  flows_max: number
+  clients: RouterClient[]
+  flows: RouterFlow[]
+  /** Newest first. */
+  dns: RouterDns[]
+  /** Newest first. */
+  lab: LabMessage[]
+}
+
+/** Everything the device recorded (every list is bounded), so it is also the export. */
+export const getRouter = () => authApi<RouterLab | { enabled: false }>('/api/v1/router')
+export const setCapture = (enabled: boolean) => authApi('/api/v1/router/capture', { body: { enabled } })
+export const clearCapture = () => authApi('/api/v1/router/clear', { body: {} })
+/** The lab's plain-HTTP service (public): the device keeps the start of the body while capture is on. */
+export const sendLab = (text: string) => authApi<{ length: number }>('/api/v1/router/lab', { body: { text } })

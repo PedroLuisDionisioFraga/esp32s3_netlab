@@ -8,7 +8,8 @@ menu "Netlab web access"
             session token it gets back ("Authorization: Bearer <token>"). The login page, the
             static files, GET /api/v1/about and, while the Wi-Fi setup network is open, the three
             Wi-Fi provisioning routes stay public: a phone joining the setup network has to be able
-            to reach them.
+            to reach them. In router lab mode, POST /api/v1/router/lab (the lab service students'
+            devices call) is public too; it records only while the capture is on.
 
             Turn it off to go back to an open API (anyone on the network can use it).
 
