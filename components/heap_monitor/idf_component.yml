@@ -1,4 +1,10 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  # Exact version: heap_monitor.c uses heaptop's private headers (src/), which can change in any release.
-  pedroluisdionisiofraga/heaptop: "==0.3.0"
+  # heaptop 0.4.0 adds the public JSON export (heaptop_json_snapshot) this component streams, so the private
+  # headers and the exact 0.3.0 pin are gone. It is not on the registry yet: until it is published this points at the
+  # local clone. Then replace the whole block with
+  #   pedroluisdionisiofraga/heaptop: "^0.4.0"
+  # and run "idf.py reconfigure" so dependencies.lock records the registry version. (^0.3.x would NOT accept 0.4.0.)
+  pedroluisdionisiofraga/heaptop:
+    version: "*"
+    override_path: "../../../esp32s3_heaptop"
