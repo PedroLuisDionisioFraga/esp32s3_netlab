@@ -29,12 +29,12 @@ Boot sequence (`main/app_main.c`):
 |---|---|
 | `components/wifi_bridge` | Wi-Fi manager: saved network in NVS, reconnect, setup network, captive-portal DNS, provisioning, scan. The router-to-AP bridge (NAT) comes in milestone 4. |
 | `components/chip_health` | Internal temperature sensor, heap, uptime, reset reason. |
-| `components/heap_monitor` | Runs [heaptop](https://components.espressif.com/components/pedroluisdionisiofraga/heaptop) and renders its `ht` console views as text for the `/heaptop` page. |
+| `components/heap_monitor` | Runs [heaptop](https://components.espressif.com/components/pedroluisdionisiofraga/heaptop) and streams its latest sample as one JSON document (`heaptop_json_snapshot()`) for the Memory page. |
 | `components/notification_manager` | Owns the onboard LED. One worker task is the only LED writer; `wifi_bridge` sets a `NOTIF_EVT_CONN_*` event bit and the worker shows the matching status color. The web UI's manual color overrides it. |
 | `components/led_device` | Hardware layer for the WS2812 (set color, off, brightness cap). Only `notification_manager` uses it. |
-| `components/rest_server` | HTTP server: JSON API, the built-in Wi-Fi setup page, static files from LittleFS. |
+| `components/rest_server` | HTTP server: JSON API with a login (`auth.c`), the built-in Wi-Fi setup page, static files from LittleFS (served gzipped). |
 | `main/reset_button.c` | Hold BOOT for 5 s to forget the saved network. |
-| `front/web` | The Vue + Vite dashboard, built into `front/web/dist` and flashed to the `www` partition. |
+| `front/web` | The Vue + TypeScript dashboard (Overview, Memory, Network, Chat), built into `front/web/dist` and flashed to the `www` partition. |
 
 ## Hardware
 
@@ -68,7 +68,10 @@ Output goes to `front/web/dist`, which is flashed into the `www` LittleFS partit
 ./build.sh --clean   # delete dist, rebuild the image without cache
 ```
 
-**Local Node.js.**
+**Local Node.js.** The first time after the dependencies changed (this is the case for the new web UI), run
+`pnpm install` once to refresh `pnpm-lock.yaml` and commit it: the Docker build installs with
+`--frozen-lockfile` and stops on a stale one. `pnpm test` runs the unit tests of the pure modules and
+`pnpm typecheck` the type check.
 
 ```powershell
 cd front/web
@@ -99,7 +102,8 @@ $env:ESP_HOST = "http://<device-ip>"
 pnpm dev
 ```
 
-The Vite dev server proxies `/api` to the device.
+The Vite dev server proxies `/api` to the device. The page signs in like any other: the token travels in
+the `Authorization` header, which the proxy leaves alone.
 
 ## First use: connecting it to your Wi-Fi
 
@@ -123,7 +127,7 @@ cannot lock the device out of a network that worked.
 - **Automatic:** if the saved network cannot be reached for 90 s (for example you plugged it in at your
   parents' house), the setup network opens again next to the retries. Connect to it and choose the new
   network. When the device is online again the setup network closes on its own.
-- **From the dashboard:** *Wi-Fi link* card -> **Change network…** forgets the saved network and restarts
+- **From the dashboard:** *Network* page -> **Forget this network…** forgets the saved network and restarts
   into setup mode.
 - **From the board:** hold the **BOOT** button for 5 seconds after the board has booted. The LED turns
   white and the device restarts into setup mode.
@@ -145,28 +149,50 @@ and a flasher can read it. Enable NVS or flash encryption if that matters to you
 
 ## Using the web page
 
-Open `http://netlab.local/` from a device on the same network.
+Open `http://netlab.local/` from a device on the same network and sign in.
 
-- **Header badge:** *Device reachable* while the page gets answers, *Device unreachable* otherwise.
-- **Chip:** die temperature (turns amber from 70 °C), uptime, free heap, lowest free heap, last reset
-  reason, chip and ESP-IDF version.
-- **Wi-Fi link:** signal quality from the RSSI, the router's network name, channel and BSSID, the IP
-  address, gateway and netmask the S3 got, and the **Change network…** button.
-- **Onboard LED:** pick a color, press **Off**, or press **Auto** to go back to the status colors.
+### Signing in
 
-### Heaptop page
+The page asks for a user name and password. The defaults are **`admin`** / **`admin`**. They are compiled
+into the firmware: change them in `menuconfig` -> *Netlab web access* (`sdkconfig` is git-ignored; this
+repository is public, so the default is known to everyone). The same menu turns the login off, and sets how
+long a session lasts without use (30 minutes by default; up to four sessions at once, so a phone and a PC
+can both be signed in). Five wrong attempts in a row lock the login for 30 seconds.
 
-Open `http://netlab.local/heaptop` (or **Heaptop** in the header). It shows the memory and CPU monitor
-[heaptop](https://github.com/PedroLuisDionisioFraga/esp32s3_heaptop) with the same text its `ht` serial
-command prints: the device renders it with heaptop's own code, so the columns match the heaptop README.
+The login is meant for a home network: the page talks plain HTTP, so the password crosses the LAN in clear.
 
-- **Top / Heap / Tasks / Health:** `ht top` (live view), `ht heap`, `ht tasks <sort>`, `ht health`.
-- **Sort** (Top and Tasks), **Pause**, **−/+** (50 ms steps up to 200 ms, 200 ms up to 3 s, 500 ms up to 5 s, then 1 s; 50 ms to 10 s): the keys of
-  `ht top` work too: `c` `m` `s` `n` sort by CPU/memory/stack/name, `p` pauses, `+`/`-` change the refresh.
-  As in `ht top`, pausing freezes the sample on screen, and a new view or sort while paused redraws that
-  same sample. The device keeps one frozen copy for all browsers, so another tab that is not paused moves
-  it on.
-- **Clear stats:** like `ht clear`. Min free, task peaks, failures, trends and the leak check start over.
+### Pages
+
+- **Header badge:** *Connected* while the page gets answers, *Offline* otherwise. The gear opens the
+  preferences: light, dark or system theme, and a compact layout. The sidebar collapses to icons on a desktop
+  and becomes a drawer on a phone.
+- **Overview:** chip temperature (turns red from 70 °C), uptime, free memory and Wi-Fi signal as tiles; the chip,
+  the Wi-Fi link (signal quality, network, channel, BSSID, IP, gateway, netmask) and the onboard LED (pick a
+  colour, **Off**, or **Auto** for the status colours).
+- **Network:** the Wi-Fi link, a scan of the networks around the lab (the one it is on is marked), and
+  **Forget this network…**, which restarts the lab into setup mode.
+- **Chat:** a placeholder: the lab answers with the same words.
+
+### Memory page
+
+Open **Memory** in the sidebar. It shows the memory and CPU monitor
+[heaptop](https://github.com/PedroLuisDionisioFraga/esp32s3_heaptop), rendered by the page from the JSON the
+lab sends.
+
+- **Tiles:** free memory, largest free block, fragmentation, PSRAM free and CPU, with a sparkline of the last
+  40 samples. **Click a tile** for a detail window: a chart of its history (1, 5 or 15 minutes, or all of it),
+  the minimum, maximum, average and change, a trend with an estimate of when it would reach heaptop's limit,
+  a map of the region (in use, free in small pieces, largest free block) or the tasks using the CPU. Hover the
+  chart or use the arrow keys for exact values, **Pause chart** to freeze it, switch to a table, or
+  **Download CSV**. The history is kept by the page while it is open (about 30 minutes, seeded from heaptop's
+  own trend, so the chart is never empty).
+- **Regions, Health:** every heap region with its usage, and the seven checks heaptop runs, each with its value
+  and its limit.
+- **Tasks:** every task with its state, priority, core, stack, CPU and (heap task tracking is on) heap, peak
+  and leak suspicion. **Filter** by name, by state, low stack, using CPU, leak suspects and core; sort by CPU,
+  heap, stack or name. The filters survive the refresh and stay for the tab.
+- **Clear statistics:** like `ht clear`. Minimum free, task peaks, failures, trends and the leak check start
+  over, and so do the charts.
 
 What each number means is in the heaptop README (*Heap basics in one minute*, *Health checks*). Memory is
 charged to the task that allocated it, so the page's own requests show up under `httpd`.
@@ -187,26 +213,34 @@ default (`menuconfig` -> *Status LED*), because a WS2812 at full power is blindi
 
 ## API
 
+Everything below needs a session (`Authorization: Bearer <token>` from `POST /api/v1/session`), except the
+two session routes, `GET /api/v1/about`, and the Wi-Fi routes marked *setup*, which are also open while the
+setup network is.
+
 | Endpoint | Method | Description |
 |---|---|---|
+| `/api/v1/about` | GET | **public:** `{name, version, hostname, auth}` (what the login page shows) |
+| `/api/v1/session` | POST | **public:** `{"username":"...","password":"..."}` -> `{"token":"...","expires_in":seconds}` (`401` wrong login, `429` locked) |
+| `/api/v1/session` | DELETE | end the session of the token in the request |
 | `/api/v1/system/info` | GET | chip, IDF version, temperature, uptime, heap, reset reason, LED state |
-| `/api/v1/link` | GET | router SSID, BSSID, channel, RSSI, IP, gateway, netmask |
+| `/api/v1/link` | GET | router SSID, BSSID, channel, RSSI, IP, gateway, netmask (*setup*) |
 | `/api/v1/led` | POST | `{"r":0-255,"g":0-255,"b":0-255}` or `{"mode":"auto"}` |
-| `/api/v1/wifi/status` | GET | setup network, saved network, result of the last connection attempt |
-| `/api/v1/wifi/scan` | GET | nearby networks (takes a few seconds) |
-| `/api/v1/wifi/provision` | POST | `{"ssid":"...","password":"..."}`: try the network, save it only if it works (answers `202`, poll `wifi/status`) |
+| `/api/v1/wifi/status` | GET | setup network, saved network, result of the last connection attempt (*setup*) |
+| `/api/v1/wifi/scan` | GET | nearby networks (takes a few seconds) (*setup*) |
+| `/api/v1/wifi/provision` | POST | `{"ssid":"...","password":"..."}`: try the network, save it only if it works (answers `202`, poll `wifi/status`) (*setup*) |
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
-| `/api/v1/heaptop` | GET | heaptop text, `text/plain`. Query: `view=top\|heap\|tasks\|health`, `sort=cpu\|heap\|stack\|name`, `refresh=50..10000`, `paused=0\|1` (`refresh` only changes the top header; `paused=1` draws the previous sample again) |
-| `/api/v1/heaptop/clear` | POST | start a fresh measurement window (`ht clear`) |
+| `/api/v1/memory` | GET | the latest heaptop sample as one JSON document (regions, health, 40-sample trends, tasks), streamed in chunks; field names are those of heaptop's stream protocol |
+| `/api/v1/memory/clear` | POST | start a fresh measurement window (`ht clear`); `{"ok":true,"pending":false}` |
+| `/api/v1/chat` | POST | `{"message":"..."}`: echoes it back |
 
-`wifi/provision` only works while the setup network is open (`409` otherwise).
+`wifi/provision` only works while the setup network is open (`409` otherwise). Static files are served
+gzipped (`.gz` next to each file, with `Content-Encoding: gzip`). An unknown path under `/api/` is a `404`.
 
 ```powershell
-curl http://netlab.local/api/v1/system/info
-curl -X POST http://netlab.local/api/v1/led -d '{"r":0,"g":0,"b":255}'
-curl -X POST http://netlab.local/api/v1/led -d '{"mode":"auto"}'
-curl http://netlab.local/api/v1/wifi/status
-curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
+$t = (curl.exe -s -X POST http://netlab.local/api/v1/session -d '{"username":"admin","password":"admin"}' | ConvertFrom-Json).token
+curl.exe http://netlab.local/api/v1/system/info -H "Authorization: Bearer $t"
+curl.exe -X POST http://netlab.local/api/v1/led -H "Authorization: Bearer $t" -d '{"r":0,"g":0,"b":255}'
+curl.exe http://netlab.local/api/v1/memory -H "Authorization: Bearer $t"
 ```
 
 ## Troubleshooting
@@ -221,18 +255,23 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
 | LED stays red | The saved router cannot be reached. After 90 s the setup network opens so you can pick another. |
 | CMake error "front/web/dist doesn't exist" | Run `build.ps1` / `build.sh` (or `pnpm install && pnpm build` in `front/web`), or disable *Flash the web UI* in `menuconfig`. |
 | Log says `Cannot mount 'www' partition` | The web UI was not flashed, so only the API and the setup page are served. Rebuild with *Flash the web UI* enabled and flash again. |
-| Page shows *Device unreachable* | The S3 is offline or you are on a different network. Check the LED and the serial log. |
-| Heaptop page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
-| Heaptop HEAP/PEAK/PSRAM columns show `-` | The build is not using `sdkconfig.defaults`' heap options: delete `sdkconfig` and build again, or enable *Heap task tracking* in `menuconfig`. |
+| Page shows *Offline* | The S3 is offline or you are on a different network. Check the LED and the serial log. |
+| The login says *Wrong user name or password* | The defaults are `admin` / `admin` unless you changed them in `menuconfig` -> *Netlab web access*. |
+| The login says *Too many attempts* | Five wrong logins lock it for 30 seconds. Wait, or reboot the board. |
+| Sent back to the login after a while | The session ended (30 minutes without use) or the board restarted: sign in again. |
+| Memory page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
+| The Tasks table has no Heap / Peak columns, or the leak check says *Not measured* | The build is not using `sdkconfig.defaults`' heap options: delete `sdkconfig` and build again, or enable *Heap task tracking* in `menuconfig`. |
+| CMake cannot find heaptop 0.4.0 | `components/heap_monitor/idf_component.yml` points at a local clone of heaptop (`../../../esp32s3_heaptop`) until 0.4.0 is on the registry. Clone it there, or switch the dependency to `^0.4.0` once it is published. |
 
 ## Notes
 
-- **No authentication on the dashboard/API.** Keep it on your home LAN and never port-forward it. Anyone
-  on the LAN can call `wifi/forget` (which restarts the device into setup mode), and anyone who knows
-  the setup network password can reconfigure the device while the setup network is open.
-- **Heap monitor costs.** heaptop takes about 32 KB of internal RAM (no PSRAM is enabled): its buffers
-  plus its 4 KB sampler task. The boot line `HEAPTOP: started: ...` prints the measured number. The page's
-  buffers take about 8 KB more. The options heaptop reads are on in `sdkconfig.defaults`. Heap task
+- **The login is basic.** One shared user, a password compiled into the firmware (`admin` / `admin` by
+  default, and this repository is public), plain HTTP, sessions in RAM. Keep the lab on your home LAN and
+  never port-forward it. While the setup network is open, the Wi-Fi provisioning routes need no login (a phone
+  joining it has no login to show), so anyone who knows the setup network password can reconfigure the device.
+- **Heap monitor costs.** heaptop's buffers go to PSRAM (the S3 board has 8 MB), and its sampler task takes 4 KB
+  of internal RAM. The boot line `HEAPTOP: started: ...` prints the measured number. The Memory page keeps one
+  2 KB snapshot copy in internal RAM. The options heaptop reads are on in `sdkconfig.defaults`. Heap task
   tracking (`CONFIG_HEAP_TASK_TRACKING`) makes every `malloc`/`free` several times slower, which can skew
   throughput measurements. It also keeps about 25 bytes of bookkeeping per live allocation (the *used*
   BLOCKS in the Heap tab) in internal RAM, and no task's HEAP column includes it. Turn it off in
@@ -242,8 +281,9 @@ curl "http://netlab.local/api/v1/heaptop?view=tasks&sort=heap"
   still hold heap. With it on, IDF keeps a record of every task ever deleted. The captive-portal DNS task
   is created and deleted each time the setup network opens, so those records would pile up until they
   push live tasks out of heaptop's table.
-- heaptop is pinned to exactly 0.3.0 (`components/heap_monitor/idf_component.yml`) because the page uses
-  its internal text renderers. Check `heap_monitor.c` still builds before raising the version.
+- The Memory page needs heaptop 0.4.0, which adds the public JSON export (`heaptop_json_snapshot()`); no
+  private header is used any more. Until 0.4.0 is on the registry, `components/heap_monitor/idf_component.yml`
+  points at a local clone; then it becomes `^0.4.0`.
 - With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
   *Caveats*): tasks suspend themselves and whoever stops them deletes them, as `dns_catch_all.c` does.
 - The Wi-Fi station keeps retrying forever, and modem power save is disabled so latency
