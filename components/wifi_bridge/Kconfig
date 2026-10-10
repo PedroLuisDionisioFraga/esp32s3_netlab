@@ -29,5 +29,7 @@ menu "Wi-Fi bridge"
             When a saved network cannot be reached (the device moved to another house, or
             the router is down), the setup network opens after this delay so a new router
             can be chosen. It closes again on its own once the device is back online.
+            If the saved network is not found at all (not in range), it is forgotten and the
+            device restarts straight into setup mode instead.
 
 endmenu

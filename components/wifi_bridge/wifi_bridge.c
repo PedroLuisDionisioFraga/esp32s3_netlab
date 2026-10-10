@@ -56,6 +56,7 @@ static int s_last_state = -1;
 static volatile bool s_online;
 static volatile bool s_ap_active;
 static bool s_sta_failed; /* the last attempt to reach the saved network failed */
+static volatile uint8_t s_last_disconnect_reason;
 static int s_ap_clients;
 static char s_ap_ssid[SSID_MAX_LEN + 1];
 static char s_ap_ip[16];
@@ -364,6 +365,14 @@ static void fallback_timer_cb(void *arg)
   if (s_online || s_ap_active)
     return;
 
+  if (strcmp(failure_reason(s_last_disconnect_reason), "not_found") == 0)
+  {
+    /* The saved router is not in range at all (moved house, renamed): forget it and boot into setup. */
+    ESP_LOGW(TAG, "Saved network not found for %d s: forgetting it", CONFIG_WIFI_BRIDGE_FALLBACK_SECONDS);
+    if (wifi_bridge_forget_and_restart(100) == ESP_OK)
+      return;
+  }
+
   ESP_LOGW(TAG, "Not connected for %d s: opening the setup network", CONFIG_WIFI_BRIDGE_FALLBACK_SECONDS);
   if (ap_enable() != ESP_OK)
   {
@@ -411,6 +420,7 @@ static void on_sta_disconnected(const wifi_event_sta_disconnected_t *event)
   }
 
   ESP_LOGW(TAG, "Disconnected (reason %d), retrying", event->reason);
+  s_last_disconnect_reason = event->reason;
   lock();
   s_online = false;
   s_sta_failed = true;
