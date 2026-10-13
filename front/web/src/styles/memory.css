@@ -74,6 +74,11 @@
   background-color: var(--nl-error);
 }
 
+/* A warning is read in the pill next to the bar as well, so the colour is never the only channel. */
+.nl-bar.is-warn > span {
+  background-color: var(--nl-warning);
+}
+
 .nl-checks {
   display: flex;
   flex-direction: column;

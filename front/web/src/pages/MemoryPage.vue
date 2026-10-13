@@ -1,15 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import LoadNotice from '../components/LoadNotice.vue'
 import MemoryHealth from '../components/memory/MemoryHealth.vue'
 import MemoryRegions from '../components/memory/MemoryRegions.vue'
+import MemoryStorage from '../components/memory/MemoryStorage.vue'
 import MemoryTasks from '../components/memory/MemoryTasks.vue'
 import MetricModal from '../components/memory/MetricModal.vue'
 import { describeError } from '../api'
+import { ApiError } from '../http'
 import { formatBytes, formatUptime } from '../format'
-import { FEATURE_RUNTIME_STATS, type MemoryAlert, type MemorySnapshot } from '../memory'
+import { FEATURE_RUNTIME_STATS, fragRegion, type MemoryAlert, type MemorySnapshot } from '../memory'
 import { clearMemory, fetchMemory } from '../memory-api'
 import { POLL_MS, type MetricKind } from '../memory-history'
+import type { StorageSnapshot } from '../storage'
+import { STORAGE_POLL_MS, fetchStorage } from '../storage-api'
 import NlIcon from '../ui/NlIcon.vue'
 import NlKpiTile from '../ui/NlKpiTile.vue'
 import NlLiveBadge from '../ui/NlLiveBadge.vue'
@@ -41,6 +45,32 @@ async function load(): Promise<void> {
 // heaptop samples once per second (components/heap_monitor); asking more often only repeats it.
 const polling = usePolling(load, POLL_MS)
 
+// Flash and NVS change slowly and are read on request (not sampled), so they have their own, slower poll. A firmware
+// without the route (404) just has no card.
+const storage = ref<StorageSnapshot | null>(null)
+const storageFailure = ref('')
+const storageMissing = ref(false)
+
+async function loadStorage(): Promise<void> {
+  try {
+    storage.value = await fetchStorage()
+    storageFailure.value = ''
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) {
+      storageMissing.value = true
+      storageFailure.value = ''
+      return
+    }
+    storageFailure.value = describeError(error)
+    throw error
+  }
+}
+
+const storagePolling = usePolling(loadStorage, STORAGE_POLL_MS)
+watch(storageMissing, (gone) => {
+  if (gone) storagePolling.stop()
+})
+
 // What the tile modals chart. It starts from heaptop's own 40-sample trend and grows with every poll.
 const history = useMemoryHistory(snapshot)
 
@@ -54,8 +84,11 @@ function openMetric(kind: MetricKind, event: Event): void {
 }
 
 function refresh(): void {
+  storageMissing.value = false
   polling.stop()
   polling.start()
+  storagePolling.stop()
+  storagePolling.start()
 }
 
 async function clear(): Promise<void> {
@@ -75,6 +108,8 @@ async function clear(): Promise<void> {
 
 const ready = computed(() => snapshot.value !== null)
 const internal = computed(() => snapshot.value?.regions.internal ?? null)
+/** The region the Fragmentation tile reads: the DMA one, so the RTC fast RAM does not inflate it (see fragRegion). */
+const fragmentation = computed(() => (snapshot.value ? fragRegion(snapshot.value.regions) : null))
 const psram = computed(() => snapshot.value?.regions.psram ?? null)
 const limits = computed(() => snapshot.value?.limits)
 const trend = computed(() => snapshot.value?.trend)
@@ -91,6 +126,7 @@ const largestDelta = computed(() =>
     ? { text: `limit ${formatBytes(limits.value.dram_largest_min)}`, trend: trendOf('dram_largest') }
     : undefined,
 )
+// The red state is heaptop's own `frag` alert, which it evaluates on the internal region, not on the one shown here.
 const fragDelta = computed(() =>
   limits.value && limits.value.frag_pct_max > 0
     ? { text: `max ${limits.value.frag_pct_max} %`, trend: trendOf('frag') }
@@ -181,11 +217,11 @@ const subtitle = computed(() => {
       <div class="nl-tile">
         <NlKpiTile
           label="Fragmentation"
-          :value="internal ? internal.frag10 / 10 : null"
+          :value="fragmentation ? fragmentation.frag10 / 10 : null"
           unit="%"
           :fraction-digits="1"
           :delta="fragDelta"
-          sub="0 % is a single free block"
+          :sub="snapshot?.regions.dma ? 'DMA-capable RAM · 0 % is a single free block' : '0 % is a single free block'"
           :loading="!ready"
         />
         <button v-if="ready" type="button" class="nl-tile-hit" aria-label="Show details of Fragmentation" aria-haspopup="dialog" @click="openMetric('frag', $event)">
@@ -230,9 +266,18 @@ const subtitle = computed(() => {
 
     <template v-if="snapshot">
       <div class="nl-grid-main">
-        <MemoryRegions :snapshot="snapshot" />
+        <MemoryRegions :snapshot="snapshot" :points="history.points.value" />
         <MemoryHealth :snapshot="snapshot" />
       </div>
+      <LoadNotice
+        v-if="storageFailure"
+        :loading="false"
+        :error="storageFailure"
+        what="the storage of the lab"
+        :stale="storage !== null"
+        @retry="refresh"
+      />
+      <MemoryStorage v-if="storage" :storage="storage" />
       <MemoryTasks :snapshot="snapshot" />
       <MetricModal
         :kind="metric"

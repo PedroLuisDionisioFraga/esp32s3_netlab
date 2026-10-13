@@ -187,8 +187,14 @@ lab sends.
   chart or use the arrow keys for exact values, **Pause chart** to freeze it, switch to a table, or
   **Download CSV**. The history is kept by the page while it is open (about 30 minutes, seeded from heaptop's
   own trend, so the chart is never empty).
-- **Regions, Health:** every heap region with its usage, and the seven checks heaptop runs, each with its value
-  and its limit.
+  **Fragmentation** is read from the DMA-capable RAM, not the internal one: the internal region also holds the
+  chip's RTC RAM, a small separate block that reads as fragmentation without being any.
+- **Regions, Health:** every heap region with its usage, its range over the last 5 minutes and whether it is
+  stable, rising, falling or varying (a firmware that reserves its memory at boot normally sits still: worry
+  about a range that only goes down), and the seven checks heaptop runs, each with its value and its limit.
+- **Storage:** the flash as a bar of its partitions (the running app marked), NVS use with a warning from 80 %
+  and an error from 90 %, the entries each NVS namespace uses, and the partition table. It is read from
+  `GET /api/v1/storage` every 30 seconds (heaptop 0.5.0).
 - **Tasks:** every task with its state, priority, core, stack, CPU and (heap task tracking is on) heap, peak
   and leak suspicion. **Filter** by name, by state, low stack, using CPU, leak suspects and core; sort by CPU,
   heap, stack or name. The filters survive the refresh and stay for the tab.
@@ -332,6 +338,7 @@ setup network is.
 | `/api/v1/wifi/forget` | POST | erase the saved network and restart into setup mode |
 | `/api/v1/memory` | GET | the latest heaptop sample as one JSON document (regions, health, 40-sample trends, tasks), streamed in chunks; field names are those of heaptop's stream protocol |
 | `/api/v1/memory/clear` | POST | start a fresh measurement window (`ht clear`); `{"ok":true,"pending":false}` |
+| `/api/v1/storage` | GET | flash size, partition table (the running app marked) and NVS usage with the entries of each namespace, as one JSON document read when asked (heaptop 0.5.0). Raw facts: sizes in bytes, NVS in entries of `entry_bytes` bytes |
 | `/api/v1/chat` | POST | `{"message":"..."}`: echoes it back |
 | `/api/v1/router` | GET | router lab: lab network, clients, counters, flows, DNS names, lab service requests (`{"enabled":false}` without router lab mode). This is also the export. |
 | `/api/v1/router/capture` | POST | `{"enabled":true\|false}`: start or stop the capture (`403` from the lab network) |
@@ -367,7 +374,7 @@ curl.exe http://netlab.local/api/v1/memory -H "Authorization: Bearer $t"
 | Sent back to the login after a while | The session ended (30 minutes without use) or the board restarted: sign in again. |
 | Memory page says `heaptop is not running` | The boot log has `Heap monitor disabled (...)`: usually not enough RAM for heaptop's buffers. |
 | The Tasks table has no Heap / Peak columns, or the leak check says *Not measured* | The build is not using `sdkconfig.defaults`' heap options: delete `sdkconfig` and build again, or enable *Heap task tracking* in `menuconfig`. |
-| CMake cannot find heaptop `^0.4.0`, or `heaptop_json.h` is missing | The build resolved an older heaptop (the Memory page needs 0.4.0 or newer). Run `idf.py reconfigure` so `dependencies.lock` picks up the registry version, and delete `managed_components/pedroluisdionisiofraga__heaptop` if it still holds an old copy. |
+| CMake cannot find heaptop `^0.5.0`, or `heaptop_json_storage` is undefined | The build resolved an older heaptop (the Memory page needs 0.5.0 or newer). Run `idf.py reconfigure` so `dependencies.lock` picks up the registry version, and delete `managed_components/pedroluisdionisiofraga__heaptop` if it still holds an old copy. |
 
 ## Notes
 
@@ -389,9 +396,10 @@ curl.exe http://netlab.local/api/v1/memory -H "Authorization: Bearer $t"
   still hold heap. With it on, IDF keeps a record of every task ever deleted. The captive-portal DNS task
   is created and deleted each time the setup network opens, so those records would pile up until they
   push live tasks out of heaptop's table.
-- The Memory page needs heaptop 0.4.0, which adds the public JSON export (`heaptop_json_snapshot()`); no
-  private header is used any more. `components/heap_monitor/idf_component.yml` asks the registry for `^0.4.0`
-  (a caret on 0.x does not reach the next minor, so a `^0.3.x` range would not accept it).
+- The Memory page needs heaptop 0.5.0: 0.4.0 added the public JSON export (`heaptop_json_snapshot()`), so no
+  private header is used any more, and 0.5.0 adds the storage facts of the Storage card (`heaptop_storage_read()`,
+  `heaptop_json_storage()`). `components/heap_monitor/idf_component.yml` asks the registry for `^0.5.0`
+  (a caret on 0.x does not reach the next minor, so a `^0.4.x` range would not accept it).
 - With heap task tracking a task must never delete itself (an ESP-IDF 6.0.2 assert, see heaptop's
   *Caveats*): tasks suspend themselves and whoever stops them deletes them, as `dns_catch_all.c` does.
 - The Wi-Fi station keeps retrying forever, and modem power save is disabled so latency

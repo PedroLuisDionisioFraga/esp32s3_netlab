@@ -3,8 +3,12 @@ import type { MemoryRegion, MemorySnapshot } from './memory'
 import {
   appendSample,
   formatMinutes,
+  fragPercentSeries,
   fragmentation10,
+  freeWindow,
   historyToCsv,
+  STABLE_RANGE_BYTES,
+  STABILITY_WINDOW_MS,
   minutesToLimit,
   pointFromSnapshot,
   seedFromTrend,
@@ -212,11 +216,112 @@ describe('historyToCsv', () => {
     const second: HistoryPoint = { ...at(3000), seq: 2 }
     expect(historyToCsv([first, second])).toBe(
       [
-        'seq,uptime_s,internal_free_b,internal_largest_b,internal_frag_pct,cpu_core0_pct',
-        '1,1,500,250,50,12.3',
-        '2,3,500,250,50,',
+        'seq,uptime_s,internal_free_b,internal_largest_b,internal_frag_pct,dma_frag_pct,cpu_core0_pct',
+        '1,1,500,250,50,,12.3',
+        '2,3,500,250,50,,',
         '',
       ].join('\n'),
     )
+  })
+
+  it('fills the DMA fragmentation where the point has a DMA region, and leaves it blank where it has none', () => {
+    const seeded: HistoryPoint = { ...at(1000), seq: 1 }
+    const polled: HistoryPoint = { ...at(3000), seq: 2, dma: { total: 900, free: 400, largest: 300, frag10: 38 } }
+    expect(historyToCsv([seeded, polled])).toBe(
+      [
+        'seq,uptime_s,internal_free_b,internal_largest_b,internal_frag_pct,dma_frag_pct',
+        '1,1,500,250,50,',
+        '2,3,500,250,50,3.8',
+        '',
+      ].join('\n'),
+    )
+  })
+})
+
+describe('fragPercentSeries', () => {
+  const internalOnly = at(1000)
+  const withDma: HistoryPoint = { ...at(3000), dma: { total: 900, free: 400, largest: 300, frag10: 38 } }
+
+  it('reads the DMA region and leaves a gap where a point has none (the seeded ones)', () => {
+    expect(fragPercentSeries([internalOnly, withDma], true)).toEqual([null, 3.8])
+  })
+
+  it('reads the internal region when the firmware has no DMA region', () => {
+    expect(fragPercentSeries([internalOnly, withDma], false)).toEqual([50, 50])
+  })
+
+  it('is empty for no points', () => {
+    expect(fragPercentSeries([], true)).toEqual([])
+  })
+})
+
+describe('freeWindow', () => {
+  // One point every 2 s (the page's poll) with the free bytes given for each region.
+  function series(internal: number[], dma: (number | null)[] = []): HistoryPoint[] {
+    return internal.map((free, i) => {
+      const dmaFree = dma[i]
+      return {
+        seq: i + 1,
+        t: i * 2000,
+        internal: { total: 400_000, free, largest: 160_000, frag10: 0 },
+        dma: dmaFree == null ? null : { total: 390_000, free: dmaFree, largest: 160_000, frag10: 0 },
+        psram: null,
+        cpu10: [],
+      }
+    })
+  }
+
+  it('calls a flat line stable and reports its range and change', () => {
+    const wobble = Array.from({ length: 41 }, (_, i) => 180_000 + (i % 3) * 64) // ends on i = 40, a 64 B step
+    const window = freeWindow(series(wobble), 'internal')
+    expect(window?.stability).toBe('stable')
+    expect(window?.min).toBe(180_000)
+    expect(window?.max).toBe(180_128)
+    expect(window?.first).toBe(180_000)
+    expect(window?.last).toBe(180_064)
+    expect(window?.delta).toBe(64)
+    expect(window?.count).toBe(41)
+  })
+
+  it('calls a steady fall falling and a steady climb rising', () => {
+    const down = Array.from({ length: 60 }, (_, i) => 180_000 - i * 400)
+    expect(freeWindow(series(down), 'internal')?.stability).toBe('falling')
+    const up = Array.from({ length: 60 }, (_, i) => 100_000 + i * 400)
+    expect(freeWindow(series(up), 'internal')?.stability).toBe('rising')
+  })
+
+  it('calls a big range without a trend varying', () => {
+    const zigzag = Array.from({ length: 60 }, (_, i) => (i % 2 === 0 ? 150_000 : 170_000))
+    expect(freeWindow(series(zigzag), 'internal')?.stability).toBe('varying')
+  })
+
+  it('looks only at the last window', () => {
+    const old = Array.from({ length: 200 }, (_, i) => 100_000 + i * 1000) // 400 s, and far from what follows
+    const recent = Array.from({ length: 160 }, () => 180_000) // 320 s at one point per 2 s: longer than the window
+    const window = freeWindow(series([...old, ...recent]), 'internal', STABILITY_WINDOW_MS)
+    expect(window?.min).toBe(180_000)
+    expect(window?.count).toBe(151) // 300 s back from the newest point, both ends included
+    expect(window?.stability).toBe('stable')
+  })
+
+  it('reads the DMA region and skips the points that have none', () => {
+    const gaps = [null, null, 166_000, 166_100, 166_000, 166_050]
+    const window = freeWindow(series([180_000, 180_000, 180_000, 180_100, 180_000, 180_050], gaps), 'dma')
+    expect(window?.count).toBe(4)
+    expect(window?.min).toBe(166_000)
+    expect(window?.max).toBe(166_100)
+  })
+
+  it('has nothing for a region without readings, and says so for too few', () => {
+    expect(freeWindow(series([180_000, 180_000]), 'dma')).toBeNull()
+    expect(freeWindow([], 'internal')).toBeNull()
+    expect(freeWindow(series([180_000, 180_000]), 'internal')?.stability).toBe('unknown')
+  })
+
+  it('treats a range just under the stable limit as stable and just over it as not', () => {
+    const under = [180_000, 180_000 + STABLE_RANGE_BYTES - 1, 180_000]
+    expect(freeWindow(series(under), 'internal')?.stability).toBe('stable')
+    const over = [180_000, 180_000 + STABLE_RANGE_BYTES, 180_000]
+    expect(freeWindow(series(over), 'internal')?.stability).not.toBe('stable')
   })
 })
