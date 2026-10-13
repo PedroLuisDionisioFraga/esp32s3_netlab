@@ -121,7 +121,8 @@ const subtitle = computed(() =>
 
     <p class="nl-limit-text">
       Standing still is expected: the firmware reserves almost all of its memory at boot and then allocates very little.
-      What to worry about is a range that only goes down and never comes back.
+      What to worry about is a range that only goes down and never comes back. What shows that readings keep coming is
+      the reading number at the top of the page: it goes up on every refresh.
     </p>
   </NlCard>
 </template>

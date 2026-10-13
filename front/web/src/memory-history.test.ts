@@ -11,6 +11,7 @@ import {
   STABILITY_WINDOW_MS,
   minutesToLimit,
   pointFromSnapshot,
+  readingsStalled,
   seedFromTrend,
   seriesStats,
   sliceRange,
@@ -323,5 +324,21 @@ describe('freeWindow', () => {
     expect(freeWindow(series(under), 'internal')?.stability).toBe('stable')
     const over = [180_000, 180_000 + STABLE_RANGE_BYTES, 180_000]
     expect(freeWindow(series(over), 'internal')?.stability).not.toBe('stable')
+  })
+})
+
+describe('readingsStalled', () => {
+  it('waits three polls before calling the readings stopped', () => {
+    expect(readingsStalled(6000, 1000)).toBe(false)
+    expect(readingsStalled(6001, 1000)).toBe(true)
+  })
+
+  it('waits three sample periods when heaptop samples slower than the page polls', () => {
+    expect(readingsStalled(15_000, 5000)).toBe(false)
+    expect(readingsStalled(15_001, 5000)).toBe(true)
+  })
+
+  it('is not stopped when the newest sample came after the last answer was timed', () => {
+    expect(readingsStalled(-5, 1000)).toBe(false)
   })
 })

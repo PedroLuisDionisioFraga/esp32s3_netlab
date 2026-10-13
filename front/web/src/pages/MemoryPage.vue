@@ -8,10 +8,10 @@ import MemoryTasks from '../components/memory/MemoryTasks.vue'
 import MetricModal from '../components/memory/MetricModal.vue'
 import { describeError } from '../api'
 import { ApiError } from '../http'
-import { formatBytes, formatUptime } from '../format'
+import { formatBytes, formatNumber, formatUptime } from '../format'
 import { FEATURE_RUNTIME_STATS, fragRegion, type MemoryAlert, type MemorySnapshot } from '../memory'
 import { clearMemory, fetchMemory } from '../memory-api'
-import { POLL_MS, type MetricKind } from '../memory-history'
+import { POLL_MS, readingsStalled, type MetricKind } from '../memory-history'
 import type { StorageSnapshot } from '../storage'
 import { STORAGE_POLL_MS, fetchStorage } from '../storage-api'
 import NlIcon from '../ui/NlIcon.vue'
@@ -24,6 +24,8 @@ import { useMemoryHistory } from '../useMemoryHistory'
 import { usePolling } from '../usePolling'
 
 const snapshot = ref<MemorySnapshot | null>(null)
+/** When the device last answered (wall clock); see `stalledMs`. */
+const answeredAt = ref<number | null>(null)
 const failure = ref('')
 const loading = ref(false)
 const clearing = ref(false)
@@ -33,6 +35,7 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     snapshot.value = await fetchMemory()
+    answeredAt.value = Date.now()
     failure.value = ''
   } catch (error) {
     failure.value = describeError(error)
@@ -73,6 +76,20 @@ watch(storageMissing, (gone) => {
 
 // What the tile modals chart. It starts from heaptop's own 40-sample trend and grows with every poll.
 const history = useMemoryHistory(snapshot)
+
+// The heap here barely moves, so the numbers cannot show that the readings are new; the sample number can. `stalledMs`
+// is how long the device has answered without a new sample (`history.endWallMs` is when the newest one came).
+const stalledMs = computed(() => {
+  const newest = history.endWallMs.value
+  return answeredAt.value !== null && newest !== null ? Math.max(0, answeredAt.value - newest) : 0
+})
+const stalled = computed(() => snapshot.value !== null && readingsStalled(stalledMs.value, snapshot.value.period_ms))
+const sampleText = computed(() => {
+  const current = snapshot.value
+  if (!current) return ''
+  const number = `reading #${formatNumber(current.seq, 0)}`
+  return stalled.value ? `${number}, ${formatUptime(stalledMs.value / 1000)} ago` : number
+})
 
 // The tile whose modal is open, and the button that opened it (the focus goes back there on close).
 const metric = ref<MetricKind | null>(null)
@@ -155,7 +172,12 @@ const subtitle = computed(() => {
   <div class="nl-stack">
     <NlPageHeader title="Memory" :subtitle="subtitle">
       <template #actions>
-        <NlLiveBadge v-if="ready" :tone="failure ? 'down' : 'live'">{{ failure ? 'No connection' : 'Live' }}</NlLiveBadge>
+        <template v-if="ready">
+          <NlLiveBadge :tone="failure ? 'down' : stalled ? 'warn' : 'live'">
+            {{ failure ? 'No connection' : stalled ? 'Readings stopped' : 'Live' }}
+          </NlLiveBadge>
+          <span v-if="!failure" class="nl-num nl-sample-seq">{{ sampleText }}</span>
+        </template>
         <button
           type="button"
           class="nl-btn nl-btn-neutral"

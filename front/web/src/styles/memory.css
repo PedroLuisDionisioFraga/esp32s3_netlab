@@ -125,6 +125,12 @@
   font-size: 12px;
 }
 
+/* The sample number beside the live badge: it goes up on every poll even when the heap stands still. */
+.nl-sample-seq {
+  color: var(--nl-muted);
+  font-size: 12px;
+}
+
 /* ---------- The history chart ----------
  * 2px lines, a 10% wash, hairline solid grid, a 2px surface ring on markers. Text wears text tokens, never the
  * series colour: identity comes from the line key beside it. */

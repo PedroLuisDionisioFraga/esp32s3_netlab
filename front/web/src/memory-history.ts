@@ -9,6 +9,17 @@ import type { Sample } from './chart'
 /** How often the page asks the device for a snapshot; the history is spaced by it. */
 export const POLL_MS = 2000
 
+/**
+ * Polls in a row without a new sample (a new `seq`) before the page says the readings stopped. A heap that stands
+ * still is normal; a sample number that stands still means heaptop's sampler is no longer running.
+ */
+export const STALL_READINGS = 3
+
+/** Whether no new sample came for `sinceNewMs`: longer than STALL_READINGS polls, or sample periods if those are longer. */
+export function readingsStalled(sinceNewMs: number, periodMs: number): boolean {
+  return sinceNewMs > STALL_READINGS * Math.max(POLL_MS, periodMs)
+}
+
 /** The KPI tiles that open a detail modal. */
 export type MetricKind = 'free' | 'largest' | 'frag' | 'psram' | 'cpu'
 
