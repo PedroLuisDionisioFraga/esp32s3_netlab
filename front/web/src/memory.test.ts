@@ -4,9 +4,13 @@ import {
   activeFilterCount,
   countByState,
   filterTasks,
+  fragRegion,
+  healthRows,
   parseTaskFilters,
   sortTasks,
   taskKeys,
+  type MemoryRegion,
+  type MemorySnapshot,
   type MemoryTask,
   type TaskFilters,
 } from './memory'
@@ -131,5 +135,71 @@ describe('parseTaskFilters', () => {
 
   it('cuts an overlong query', () => {
     expect(parseTaskFilters(JSON.stringify({ query: 'x'.repeat(200) })).query).toHaveLength(64)
+  })
+})
+
+function region(free: number, largest: number, frag10: number): MemoryRegion {
+  return { total: 1000, free, min: free, largest, frag10, used_blocks: 10, free_blocks: 2 }
+}
+
+// The internal region reads more fragmented than the DMA one: it also holds the RTC fast RAM, a free block of its own.
+const internalRegion = region(180, 160, 114)
+const dmaRegion = region(166, 160, 38)
+
+function snapshotWith(regions: MemorySnapshot['regions']): MemorySnapshot {
+  return {
+    ht: 2,
+    seq: 1,
+    t_ms: 1000,
+    since_ms: 0,
+    period_ms: 1000,
+    dt_ms: 1000,
+    self_us: 900,
+    features: 0,
+    cpu10: null,
+    regions,
+    failures: null,
+    alerts: [],
+    limits: {
+      dram_free_min: 20480,
+      dram_largest_min: 8192,
+      frag_pct_max: 80,
+      psram_free_min: 0,
+      stack_hwm_min: 256,
+      task_growth: 4096,
+    },
+  }
+}
+
+describe('fragRegion', () => {
+  it('is the DMA region, the main heap without the RTC fast RAM', () => {
+    expect(fragRegion({ internal: internalRegion, dma: dmaRegion, psram: null })).toBe(dmaRegion)
+  })
+
+  it('falls back to the internal region when the firmware reports no DMA region', () => {
+    expect(fragRegion({ internal: internalRegion, dma: null, psram: null })).toBe(internalRegion)
+  })
+
+  it('is null when there is no region at all', () => {
+    expect(fragRegion({ internal: null, dma: null, psram: null })).toBeNull()
+  })
+})
+
+describe('healthRows', () => {
+  const reading = (regions: MemorySnapshot['regions'], id: string) =>
+    healthRows(snapshotWith(regions)).find((row) => row.id === id)?.reading
+
+  it('reads the fragmentation from the DMA region, as the tile does', () => {
+    expect(reading({ internal: internalRegion, dma: dmaRegion, psram: null }, 'frag')).toBe('3.8 %')
+  })
+
+  it('falls back to the internal region for the fragmentation without a DMA region', () => {
+    expect(reading({ internal: internalRegion, dma: null, psram: null }, 'frag')).toBe('11.4 %')
+  })
+
+  it('keeps the free memory and the largest block on the internal region', () => {
+    const regions = { internal: internalRegion, dma: dmaRegion, psram: null }
+    expect(reading(regions, 'dram_free')).toBe('180 B')
+    expect(reading(regions, 'dram_largest')).toBe('160 B')
   })
 })

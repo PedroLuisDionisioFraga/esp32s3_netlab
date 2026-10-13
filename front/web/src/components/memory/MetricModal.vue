@@ -2,11 +2,12 @@
 import { computed, ref, shallowRef, watch } from 'vue'
 import { axisFor, formatAgo, type ChartLimit, type ChartSeries, type Sample } from '../../chart'
 import { formatBytes, formatNumber, formatUptime } from '../../format'
-import type { MemoryRegion, MemorySnapshot } from '../../memory'
+import { fragRegion, type MemoryRegion, type MemorySnapshot } from '../../memory'
 import {
   HISTORY_RANGES,
   POLL_MS,
   formatMinutes,
+  fragPercentSeries,
   historyToCsv,
   minutesToLimit,
   seriesStats,
@@ -161,13 +162,16 @@ const config = computed<Config | null>(() => {
       }
     }
     case 'frag': {
-      const values = points.map((point) => point.internal.frag10 / 10)
+      // Read from the DMA region when there is one (see fragRegion); its seeded points are gaps.
+      const onDma = regions.dma !== null
+      const values = fragPercentSeries(points, onDma)
       const ceiling = limits?.frag_pct_max ?? 0
       return {
         title: 'Fragmentation',
-        subtitle: 'Internal RAM',
+        subtitle: onDma ? 'DMA-capable RAM' : 'Internal RAM',
         explain:
-          'How much of the free memory is scattered in small pieces. 0 % is a single block; 100 % is everything chopped up, and no large allocation fits.',
+          'How much of the free memory is scattered in small pieces. 0 % is a single block; 100 % is everything chopped up, and no large allocation fits.' +
+          (onDma ? ' Measured on the DMA-capable RAM, which is the chip’s main heap.' : ''),
         series: [{ id: 'frag', label: 'Fragmentation', color: S1, values, area: true, format: pct }],
         basis: values,
         unit: 1,
@@ -178,7 +182,7 @@ const config = computed<Config | null>(() => {
         format: pct,
         signed: signedPct,
         rate: (perMin) => `${pct(Math.abs(perMin))}/min`,
-        region: regions.internal,
+        region: fragRegion(regions),
       }
     }
     case 'psram': {
@@ -314,6 +318,9 @@ const summary = computed(() => {
   return `${c.title}: now ${c.format(s.last)}, minimum ${c.format(s.min)}, maximum ${c.format(s.max)}, average ${c.format(s.mean)}, ${windowText.value}.`
 })
 
+/** The Fragmentation modal is about the DMA region (see fragRegion), so its map is that region's, not the internal one. */
+const fragOnDma = computed(() => props.kind === 'frag' && current.value.snapshot.regions.dma !== null)
+
 const subtitle = computed(() => {
   const c = config.value
   const every = formatNumber(current.value.snapshot.period_ms / 1000)
@@ -431,7 +438,7 @@ function download(): void {
       </div>
 
       <section v-if="config.region" class="nl-metric-extra">
-        <h3>{{ kind === 'psram' ? 'PSRAM map' : 'Internal RAM map' }}</h3>
+        <h3>{{ kind === 'psram' ? 'PSRAM map' : fragOnDma ? 'DMA-capable RAM map' : 'Internal RAM map' }}</h3>
         <MemoryMap :total="config.region.total" :free="config.region.free" :largest="config.region.largest" />
         <p v-if="kind === 'frag'" class="nl-dialog-sub nl-num" style="margin-top: 8px">
           {{ config.region.used_blocks }} blocks in use · {{ config.region.free_blocks }} free blocks

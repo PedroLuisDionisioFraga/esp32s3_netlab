@@ -85,6 +85,16 @@ export interface MemoryClearResult {
   pending?: boolean
 }
 
+/**
+ * The region the fragmentation is read from: the DMA-capable one. The internal region also holds the RTC fast RAM
+ * (when it is added to the heap), a small free block of its own that can never merge with the main heap, so its
+ * fragmentation reads high for a reason that is not fragmentation. Without a DMA region (an older firmware) the
+ * internal one is the best there is.
+ */
+export function fragRegion(regions: MemorySnapshot['regions']): MemoryRegion | null {
+  return regions.dma ?? regions.internal
+}
+
 export const TASK_STATE_LABELS: Readonly<Record<MemoryTaskState, string>> = {
   running: 'Running',
   ready: 'Ready',
@@ -271,6 +281,7 @@ export function healthRows(snapshot: MemorySnapshot): HealthRow[] {
     limit === undefined ? '—' : limit === 0 ? 'Off' : `min ${show(limit)}`
 
   const internal = regions.internal
+  const fragmentation = fragRegion(regions)
   const psram = regions.psram
   const stack = lowestStack(snapshot.tasks)
   const hasFailures = (snapshot.features & FEATURE_FAIL_CB) !== 0 && snapshot.failures !== null
@@ -294,7 +305,7 @@ export function healthRows(snapshot: MemorySnapshot): HealthRow[] {
     {
       id: 'frag',
       label: ALERT_LABELS.frag,
-      reading: internal ? formatPercent10(internal.frag10) : '—',
+      reading: fragmentation ? formatPercent10(fragmentation.frag10) : '—',
       limit:
         limits === undefined ? '—' : limits.frag_pct_max === 0 ? 'Off' : `max ${limits.frag_pct_max} %`,
       state: stateOf('frag', limits?.frag_pct_max),

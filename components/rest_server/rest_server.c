@@ -560,6 +560,23 @@ static esp_err_t memory_get_handler(httpd_req_t *req)
   return httpd_resp_send_chunk(req, NULL, 0); /* the empty chunk ends the response */
 }
 
+/* The flash size, the partition table and the NVS usage as one JSON document (heaptop_json_storage()). It is read when
+ * asked, not sampled, and it changes slowly, so the page polls it far less often than the memory document. The page is
+ * front/web/src/pages/MemoryPage.vue. */
+static esp_err_t storage_get_handler(httpd_req_t *req)
+{
+  if (!require_session(req))
+    return ESP_OK;
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+  if (heap_monitor_write_storage_json(memory_sink, req) != ESP_OK)
+    return ESP_FAIL; /* part of the document may be on the wire: closing the connection is what tells the browser */
+
+  return httpd_resp_send_chunk(req, NULL, 0); /* the empty chunk ends the response */
+}
+
 /* Starts a fresh measurement window, like `ht clear`. */
 static esp_err_t memory_clear_post_handler(httpd_req_t *req)
 {
@@ -1169,7 +1186,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.uri_match_fn = httpd_uri_match_wildcard;
-  config.max_uri_handlers = 20; /* 18 in use with router lab mode, and room for later milestones */
+  config.max_uri_handlers = 20; /* 19 in use with router lab mode, and room for later milestones */
   config.stack_size = 6144;
   config.open_fn = diag_open;
   config.lru_purge_enable = true; /* browsers open several sockets; recycle the oldest when full */
@@ -1197,6 +1214,7 @@ esp_err_t rest_server_start(const rest_server_config_t *cfg)
     {.uri = "/api/v1/wifi/forget", .method = HTTP_POST, .handler = wifi_forget_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/memory", .method = HTTP_GET, .handler = memory_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/memory/clear", .method = HTTP_POST, .handler = memory_clear_post_handler, .user_ctx = ctx},
+    {.uri = "/api/v1/storage", .method = HTTP_GET, .handler = storage_get_handler, .user_ctx = ctx},
     {.uri = "/api/v1/chat", .method = HTTP_POST, .handler = chat_post_handler, .user_ctx = ctx},
     {.uri = "/api/v1/router", .method = HTTP_GET, .handler = router_get_handler, .user_ctx = ctx},
 #if CONFIG_WIFI_BRIDGE_ROUTER_MODE

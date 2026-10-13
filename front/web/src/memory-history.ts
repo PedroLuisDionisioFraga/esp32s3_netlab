@@ -41,6 +41,18 @@ export function fragmentation10(free: number, largest: number): number {
   return Math.floor(((free - largest) * 1000) / free)
 }
 
+/**
+ * The fragmentation of each point in percent, for the chart. With `useDma` it is the DMA region's (see `fragRegion` in
+ * memory.ts for why), and a point without one is a gap, not the internal value: heaptop's trend, which seeds the
+ * history, carries no DMA series. Without a DMA region in the firmware, `useDma` is false and it is the internal one.
+ */
+export function fragPercentSeries(points: readonly HistoryPoint[], useDma: boolean): Sample[] {
+  return points.map((point): Sample => {
+    const region = useDma ? point.dma : point.internal
+    return region ? region.frag10 / 10 : null
+  })
+}
+
 function sampleOf(region: MemoryRegion | null): RegionSample | null {
   return region ? { total: region.total, free: region.free, largest: region.largest, frag10: region.frag10 } : null
 }
@@ -202,6 +214,67 @@ export function minutesToLimit(stats: SeriesStats | null, limit: number, kind: '
   return (limit - stats.last) / stats.slopePerMin
 }
 
+/** How far back the Regions card looks when it says whether a region is moving. */
+export const STABILITY_WINDOW_MS = 300_000
+/** A free-memory range narrower than this is stable: some allocation noise (a socket, a buffer) and nothing lasting. */
+export const STABLE_RANGE_BYTES = 1024
+/** Fewer readings than this say nothing about stability. */
+export const MIN_STABILITY_POINTS = 3
+
+/**
+ * 'stable': the free memory stayed inside STABLE_RANGE_BYTES; 'falling' / 'rising': it moved a lot and along a line;
+ * 'varying': it moved a lot without a trend (normal use); 'unknown': too few readings.
+ */
+export type Stability = 'stable' | 'rising' | 'falling' | 'varying' | 'unknown'
+
+/** The free memory of one region over the last stretch of the history. */
+export interface FreeWindow {
+  /** Readings that had the region (the seeded points have no DMA reading). */
+  count: number
+  min: number
+  max: number
+  first: number
+  last: number
+  /** last - first, in bytes. */
+  delta: number
+  stability: Stability
+}
+
+function stabilityOf(stats: SeriesStats): Stability {
+  if (stats.count < MIN_STABILITY_POINTS) return 'unknown'
+  if (stats.max - stats.min < STABLE_RANGE_BYTES) return 'stable'
+  if (stats.slopePerMin !== null && stats.r2 !== null && stats.r2 >= MIN_PROJECTION_R2) {
+    return stats.slopePerMin < 0 ? 'falling' : 'rising'
+  }
+  return 'varying'
+}
+
+/**
+ * What the free memory of `region` did in the last `ms` milliseconds of `points`, or null when none of them has the
+ * region. A computer's memory moves all the time; this firmware reserves almost everything at boot, so the honest
+ * answer is often "stable", and this is what lets the page say so instead of looking frozen.
+ */
+export function freeWindow(
+  points: readonly HistoryPoint[],
+  region: 'internal' | 'dma' | 'psram',
+  ms: number | null = STABILITY_WINDOW_MS,
+): FreeWindow | null {
+  const recent = sliceRange(points, ms)
+  const ts = recent.map((point) => point.t)
+  const values = recent.map((point): Sample => point[region]?.free ?? null)
+  const stats = seriesStats(ts, values)
+  if (!stats) return null
+  return {
+    count: stats.count,
+    min: stats.min,
+    max: stats.max,
+    first: stats.first,
+    last: stats.last,
+    delta: stats.delta,
+    stability: stabilityOf(stats),
+  }
+}
+
 /** "about 12 min", "about 3 h", "more than 1 day": a projection as a sentence fragment. */
 export function formatMinutes(minutes: number): string {
   if (minutes < 1) return 'less than 1 min'
@@ -220,6 +293,7 @@ export function historyToCsv(points: readonly HistoryPoint[]): string {
     'internal_free_b',
     'internal_largest_b',
     'internal_frag_pct',
+    'dma_frag_pct',
     ...Array.from({ length: cores }, (_, core) => `cpu_core${core}_pct`),
   ]
   const rows = points.map((point) =>
@@ -229,6 +303,7 @@ export function historyToCsv(points: readonly HistoryPoint[]): string {
       point.internal.free,
       point.internal.largest,
       point.internal.frag10 / 10,
+      point.dma ? point.dma.frag10 / 10 : '',
       ...Array.from({ length: cores }, (_, core) => (point.cpu10[core] === undefined ? '' : (point.cpu10[core] as number) / 10)),
     ].join(','),
   )
