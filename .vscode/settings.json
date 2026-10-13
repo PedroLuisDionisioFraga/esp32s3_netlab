@@ -16,5 +16,5 @@
     "--compile-commands-dir=c:\\Users\\pedro\\Desktop\\projects\\ESP32\\esp32s3_netlab\\build"
   ],
   "idf.flashType": "UART",
-  "idf.port": "COM6"
+  "idf.port": "COM5"
 }
