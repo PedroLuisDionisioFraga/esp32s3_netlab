@@ -38,6 +38,18 @@ extern "C"
   esp_err_t heap_monitor_write_json(heap_monitor_sink_t sink, void *ctx);
 
   /**
+   * @brief Write the flash size, the partition table and the NVS usage as one JSON document
+   *        (heaptop_storage_read() + heaptop_json_storage()).
+   *
+   * Read when called: nothing is sampled in the background, and it does not need heaptop to be running. Streams
+   * through @p sink, nothing is allocated for the document. The structure it fills is shared: call this from one
+   * task only (the HTTP server's, which runs every handler).
+   *
+   * @return ESP_OK; ESP_ERR_INVALID_ARG for a NULL @p sink; ESP_FAIL when @p sink stopped the document.
+   */
+  esp_err_t heap_monitor_write_storage_json(heap_monitor_sink_t sink, void *ctx);
+
+  /**
    * @brief Start a fresh measurement window: minimum free, failures, trends, leak history.
    *
    * Blocks until heaptop has published the cleared sample (normally a few ms). Stack high-water marks keep

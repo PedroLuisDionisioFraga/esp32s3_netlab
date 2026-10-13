@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
-  # 0.4.0 adds the public JSON export (heaptop_json_snapshot) this component streams. A caret on 0.x stops below
-  # the next minor, so ^0.3.x would not accept it.
-  pedroluisdionisiofraga/heaptop: "^0.4.0"
+  # 0.4.0 added the public JSON export (heaptop_json_snapshot) this component streams; 0.5.0 adds the storage facts
+  # (heaptop_storage_read, heaptop_json_storage). A caret on 0.x stops below the next minor, so ^0.4.x would not
+  # accept it.
+  pedroluisdionisiofraga/heaptop: "^0.5.0"

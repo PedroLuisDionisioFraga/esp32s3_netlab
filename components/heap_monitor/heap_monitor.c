@@ -13,6 +13,8 @@ typedef struct
   heaptop_config_t cfg; /* what heaptop runs with: its thresholds go out with every document */
   /* About 2 KB: too big for the HTTP server's stack, so it is kept here. One reader (the HTTP task), no lock. */
   heaptop_snapshot_t snap;
+  /* Under 1 KB, for the same reason: kept here, one reader, no lock. */
+  heaptop_storage_t storage;
 } heap_monitor_priv_t;
 
 static heap_monitor_priv_t s_priv;
@@ -42,6 +44,16 @@ esp_err_t heap_monitor_write_json(heap_monitor_sink_t sink, void *ctx)
     return ESP_ERR_NOT_FOUND;
 
   return heaptop_json_snapshot(&s_priv.snap, &s_priv.cfg.thresholds, HEAPTOP_JSON_ALL, sink, ctx) ? ESP_OK : ESP_FAIL;
+}
+
+esp_err_t heap_monitor_write_storage_json(heap_monitor_sink_t sink, void *ctx)
+{
+  ESP_RETURN_ON_FALSE(sink, ESP_ERR_INVALID_ARG, TAG, "sink is NULL");
+
+  /* NULL = the default NVS partition, the one the Wi-Fi settings and the rest of the firmware use. What cannot be
+   * read comes back as a null in the document. */
+  ESP_RETURN_ON_ERROR(heaptop_storage_read(NULL, &s_priv.storage), TAG, "read storage");
+  return heaptop_json_storage(&s_priv.storage, sink, ctx) ? ESP_OK : ESP_FAIL;
 }
 
 esp_err_t heap_monitor_clear(void)
