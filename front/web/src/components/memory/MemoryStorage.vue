@@ -9,7 +9,6 @@ import {
   nvsTone,
   nvsUsagePct,
   sortNamespaces,
-  type PartitionRole,
   type StorageSnapshot,
   type StorageTone,
 } from '../../storage'
@@ -23,13 +22,11 @@ import type { PillTone, TableColumn } from '../../ui/types'
 // wording, the colours and the 80 % / 90 % limits are this page's (storage.ts).
 const props = defineProps<{ storage: StorageSnapshot }>()
 
-const ROLE_COLORS: Readonly<Record<PartitionRole, string>> = {
-  app: 'var(--nl-series-1)',
-  nvs: 'var(--nl-series-3)',
-  files: 'var(--nl-series-2)',
-  system: 'var(--nl-muted)',
-  outside: 'var(--nl-map-scattered)',
-}
+// One colour per partition, in offset order (categorical slots 1-8, tokens.css), so neighbours of the same kind (ota_0 and
+// ota_1) and the small system partitions (otadata, phy_init) stay apart. What no partition covers, and any partition past
+// the eighth, are neutral: the legend and the table name each one.
+const PARTITION_COLORS = Array.from({ length: 8 }, (_, slot) => `var(--nl-series-${slot + 1})`)
+const NEUTRAL_COLOR = 'var(--nl-map-scattered)'
 
 const PILL_TONES: Readonly<Record<StorageTone, PillTone>> = { ok: 'success', warn: 'warning', error: 'error' }
 
@@ -42,7 +39,12 @@ const subtitle = computed(() => {
   return flash ? `${formatBytes(flash)} of flash · ${count}` : `Flash size unknown · ${count}`
 })
 
-const segments = computed(() => flashLayout(props.storage))
+const segments = computed(() =>
+  flashLayout(props.storage).map((segment, index) => ({
+    ...segment,
+    color: segment.role === 'outside' ? NEUTRAL_COLOR : (PARTITION_COLORS[index] ?? NEUTRAL_COLOR),
+  })),
+)
 const summary = computed(() =>
   segments.value.map((segment) => `${segment.label}: ${formatBytes(segment.bytes)} (${percent(segment.pct)})`).join('; '),
 )
@@ -109,13 +111,13 @@ const partitionRows = computed(() =>
             v-for="segment in segments"
             :key="segment.key"
             class="nl-map-seg"
-            :style="{ flexGrow: segment.bytes, backgroundColor: ROLE_COLORS[segment.role] }"
+            :style="{ flexGrow: segment.bytes, backgroundColor: segment.color }"
             :title="`${segment.label}: ${formatBytes(segment.bytes)} (${percent(segment.pct)})`"
           />
         </div>
         <ul class="nl-map-legend">
           <li v-for="segment in segments" :key="segment.key">
-            <span class="nl-key" :style="{ backgroundColor: ROLE_COLORS[segment.role] }" aria-hidden="true" />
+            <span class="nl-key" :style="{ backgroundColor: segment.color }" aria-hidden="true" />
             <span class="nl-map-label">
               {{ segment.label }}
               <NlPill v-if="segment.running" tone="info">Running</NlPill>
